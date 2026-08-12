@@ -7,6 +7,7 @@ version selection, and real add/import actions against a chosen pack.
 from __future__ import annotations
 
 import math
+import time
 from collections import OrderedDict
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
@@ -22,6 +23,12 @@ from icons import icon
 from views.misc import _load_state, _save_state
 
 PAGE_SIZE_CHOICES = [24, 48, 96]
+
+# A provider can answer 200 with an empty result set during a momentary
+# catalog/network blip (no hits, no error). Bounded retries with backoff
+# recover those; real failures raise or carry `error` and return at once.
+RETRY_EMPTY_ATTEMPTS = 3
+RETRY_BACKOFF_MS = 500
 
 
 TYPES = [
@@ -348,10 +355,17 @@ class DiscoverView(QWidget):
         self._show_loading()
 
         def fetch():
-            return self.api.search(q=query, provider=self._provider, mc=self._version,
-                                   loader=self._loader, type=self._type,
-                                   offset=self._page * self._page_size,
-                                   page_size=self._base_page_size)
+            result = None
+            for attempt in range(RETRY_EMPTY_ATTEMPTS):
+                result = self.api.search(q=query, provider=self._provider, mc=self._version,
+                                         loader=self._loader, type=self._type,
+                                         offset=self._page * self._page_size,
+                                         page_size=self._base_page_size)
+                if result.get("hits") or result.get("error"):
+                    return result
+                if attempt < RETRY_EMPTY_ATTEMPTS - 1:
+                    time.sleep(RETRY_BACKOFF_MS * (attempt + 1) / 1000.0)
+            return result
 
         def ok(result):
             if serial != self._search_serial:

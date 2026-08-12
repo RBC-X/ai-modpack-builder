@@ -2,6 +2,8 @@
 
 **Describe a Minecraft experience in plain English — the app builds it, tests it, repairs it, and lets you play it.**
 
+[![Pages + screenshots](https://github.com/RBC-X/ai-modpack-builder/actions/workflows/pages-screenshots.yml/badge.svg)](https://github.com/RBC-X/ai-modpack-builder/actions/workflows/pages-screenshots.yml)
+
 > "Make me a Minecraft 1.20.1 medieval fantasy RPG modpack with around 120 mods, Create, magic, better villages, bosses, structures, realistic terrain, shaders, and good performance on 8 GB RAM."
 
 The app searches real providers (Modrinth, plus CurseForge with a key), resolves dependencies and conflicts, downloads the mods, **launches the game to test the pack**, repairs crashes automatically, and exports a validated Modrinth `.mrpack`, CurseForge ZIP, and server pack. Nothing here is fake — every PASS in this project comes from a test that actually ran.
