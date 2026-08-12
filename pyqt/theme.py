@@ -38,6 +38,41 @@ CURSEFORGE= "#F16436"
 MONO = "JetBrains Mono"
 SANS = "Inter"
 
+# --------------------------------------------------------------------------
+# Scales (design tokens — the single source of truth for layout rhythm)
+# --------------------------------------------------------------------------
+# Spacing scale (px)
+S_2, S_4, S_6, S_8, S_12, S_16, S_20, S_24, S_32, S_40, S_48, S_64 = (2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64)
+
+# Radius scale — restrained, never random per-widget
+R_XS   = 4    # progress, micro-chips
+R_SM   = 6    # tooltips, tags, scrollbars, combo menus
+R_MD   = 8    # buttons, inputs, pills, nav items
+R_LG   = 10   # status banners, image/gallery frames
+R_XL   = 12   # cards, panels, dialogs
+R_2XL  = 16   # hero, large featured surfaces
+
+# Typography scale (px)
+T_DISPLAY = 26   # h1 / hero titles
+T_HERO    = 48   # banner-title (home hero)
+T_PACK    = 36   # pack-title
+T_PAGE    = 18   # h2 / section
+T_SECTION = 14   # h3 / sub
+T_BODY    = 13   # default
+T_SMALL   = 12   # secondary
+T_MUTED   = 11   # captions
+
+# Motion durations (ms) — quick / normal / emphasis
+M_QUICK     = 120
+M_NORMAL    = 200
+M_EMPHASIS  = 320
+
+# Component heights (px)
+H_XS = 26
+H_SM = 34
+H_MD = 42
+H_LG = 48
+
 
 def setup_fonts(app: QApplication) -> None:
     from engine.core import resource_path
@@ -92,23 +127,23 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QFrame[cls="card"] {{
     background: {CARD};
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="card-hover"] {{
     background: {CARD};
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="card-hover"]:hover {{ border: 1px solid {BORDER2}; }}
 QFrame[cls="card-selected"] {{
     background: {CARD};
     border: 1px solid rgba(57,184,106,0.58);
-    border-radius: 12px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="panel"] {{
     background: {PANEL};
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="artwork"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -121,45 +156,45 @@ QFrame[cls="artwork"] {{
 QFrame[cls="hero"] {{
     background: {CARD};
     border: 1px solid {BORDER};
-    border-radius: 16px;
+    border-radius: {R_2XL}px;
 }}
 QFrame[cls="hero-running"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
         stop:0 #17251E, stop:0.6 #1A1E1B, stop:1 #191C1F);
     border: 1px solid rgba(57,184,106,0.45);
-    border-radius: 16px;
+    border-radius: {R_2XL}px;
 }}
 QFrame[cls="search-panel"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #181C1E, stop:0.58 #171A1C, stop:1 #151918);
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 14px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="status-banner"] {{
     background: rgba(32,36,40,0.56);
     border: 1px solid {BORDER};
-    border-radius: 10px;
+    border-radius: {R_LG}px;
 }}
 QFrame[cls="image-frame"] {{
     background: #121517;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 11px;
+    border-radius: {R_LG}px;
 }}
 QFrame[cls="gallery-frame"] {{
     background: #121517;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 9px;
+    border-radius: {R_LG}px;
 }}
 QFrame[cls="skeleton"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
         stop:0 #191D20, stop:0.52 #202529, stop:1 #191D20);
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="empty-state"] {{
     background: rgba(25,28,31,0.72);
     border: 1px dashed rgba(255,255,255,0.14);
-    border-radius: 14px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="drawer"] {{
     background: #151819;
@@ -186,12 +221,12 @@ QFrame[cls="topbar"] {{
 QFrame[cls="logo-badge"] {{
     background: rgba(57,184,106,0.14);
     border: 1px solid rgba(57,184,106,0.48);
-    border-radius: 8px;
+    border-radius: {R_MD}px;
 }}
 QFrame[cls="account-card"] {{
     background: {CARD};
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: {R_XL}px;
 }}
 QFrame[cls="sidebar-divider"] {{
     background: {PANEL};
@@ -203,7 +238,7 @@ QPushButton[cls="nav"] {{
     text-align: left;
     padding: 0 14px;
     border: none;
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     font-weight: 500;
 }}
 QPushButton[cls="nav"]:hover {{ background: rgba(25,28,31,0.6); color: {TEXT}; }}
@@ -226,7 +261,7 @@ QLabel[cls="nav-label-active"] {{
 QLabel[cls="nav-badge"] {{
     background: {HOVER};
     color: {TEXT2};
-    border-radius: 4px;
+    border-radius: {R_XS}px;
     padding: 2px 6px;
     font-family: "{MONO}";
     font-size: 10px;
@@ -236,7 +271,7 @@ QLabel[cls="nav-badge-ai"] {{
     background: rgba(57,184,106,0.16);
     color: {GREEN};
     border: 1px solid rgba(57,184,106,0.32);
-    border-radius: 4px;
+    border-radius: {R_XS}px;
     padding: 2px 6px;
     font-family: "{MONO}";
     font-size: 10px;
@@ -249,7 +284,7 @@ QPushButton[cls="btn-primary"] {{
     color: #111315;
     font-weight: 700;
     border: none;
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 10px 18px;
 }}
 QPushButton[cls="btn-primary"]:hover {{ background: {GREEN_HOVER}; }}
@@ -264,7 +299,7 @@ QPushButton[cls="btn-dark"] {{
     background: {HOVER};
     color: {TEXT};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 10px 18px;
     font-weight: 600;
 }}
@@ -275,7 +310,7 @@ QPushButton[cls="btn-microsoft"] {{
     background: #FFFFFF;
     color: #1F1F1F;
     border: 1px solid #8C8C8C;
-    border-radius: 4px;
+    border-radius: {R_XS}px;
     padding: 10px 18px;
     font-size: 13px;
     font-weight: 600;
@@ -288,7 +323,7 @@ QPushButton[cls="btn-danger"] {{
     background: {DANGER};
     color: {TEXT};
     border: none;
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 10px 18px;
     font-weight: 700;
 }}
@@ -298,14 +333,14 @@ QPushButton[cls="iconbtn"] {{
     background: {HOVER};
     color: {TEXT2};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 6px;
 }}
 QPushButton[cls="iconbtn"]:hover {{ background: {HOVER2}; color: {TEXT}; }}
 QPushButton[cls="window-dot"] {{
     background: rgba(255,255,255,0.10);
     border: none;
-    border-radius: 6px;
+    border-radius: {R_SM}px;
     min-width: 12px;
     max-width: 12px;
     min-height: 12px;
@@ -318,7 +353,7 @@ QPushButton[cls="ghost"] {{
     background: transparent;
     color: {TEXT2};
     border: none;
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 6px 10px;
 }}
 QPushButton[cls="ghost"]:hover {{ background: {HOVER}; color: {TEXT}; }}
@@ -341,7 +376,7 @@ QPushButton[cls="top-compact"] {{
     background: rgba(32,36,40,0.58);
     color: {TEXT};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 4px 10px;
     font-family: "{MONO}";
     font-size: 11px;
@@ -356,7 +391,7 @@ QPushButton[cls="top-compact"][active="true"] {{
 QFrame[cls="top-compact-frame"] {{
     background: rgba(32,36,40,0.58);
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
 }}
 QLabel[cls="top-title"] {{ font-size: 14px; font-weight: 600; color: {TEXT}; }}
 QLabel[cls="top-mono"] {{ font-family: "{MONO}"; font-size: 11px; color: {TEXT}; }}
@@ -368,7 +403,7 @@ QLabel[cls="toast"] {{
     background: {HOVER2};
     color: {TEXT};
     border: 1px solid {BORDER2};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 9px 12px;
     font-size: 12px;
 }}
@@ -378,7 +413,7 @@ QPushButton[cls="pill"] {{
     background: {HOVER};
     color: {TEXT2};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 4px 12px;
     font-family: "{MONO}";
     font-size: 11px;
@@ -394,7 +429,7 @@ QPushButton[cls="source-pill"] {{
     background: #202428;
     color: {TEXT2};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 7px 12px;
     font-size: 11px;
     font-weight: 650;
@@ -418,7 +453,7 @@ QPushButton[cls="provider-pill"] {{
     background: rgba(71,201,122,0.10);
     color: {MODRINTH};
     border: 1px solid rgba(71,201,122,0.34);
-    border-radius: 7px;
+    border-radius: {R_SM}px;
     padding: 3px 8px;
     font-family: "{MONO}";
     font-size: 9px;
@@ -433,7 +468,7 @@ QPushButton[cls="tag-pill"] {{
     background: rgba(255,255,255,0.035);
     color: {TEXT2};
     border: 1px solid {BORDER};
-    border-radius: 7px;
+    border-radius: {R_SM}px;
     padding: 2px 7px;
     font-size: 10px;
 }}
@@ -446,7 +481,7 @@ QPushButton[cls="settings-nav"] {{
     background: transparent;
     color: {TEXT2};
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 9px 14px;
     text-align: left;
     font-size: 13px;
@@ -464,7 +499,7 @@ QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {{
     background: {HOVER};
     color: {TEXT};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     padding: 8px 12px;
     selection-background-color: {GREEN_DARK};
 }}
@@ -477,7 +512,7 @@ QComboBox QAbstractItemView {{
     background: {HOVER2};
     color: {TEXT};
     border: 1px solid {BORDER2};
-    border-radius: 6px;
+    border-radius: {R_SM}px;
     selection-background-color: {GREEN_DARK};
     padding: 4px;
 }}
@@ -487,7 +522,7 @@ QCheckBox::indicator {{
     height: 16px;
     background: {HOVER};
     border: 1px solid {MUTED};
-    border-radius: 4px;
+    border-radius: {R_XS}px;
 }}
 QCheckBox::indicator:checked {{
     background: {GREEN};
@@ -501,19 +536,19 @@ QSlider::groove:horizontal {{
 QSlider::sub-page:horizontal {{ background: {GREEN}; border-radius: 3px; }}
 QSlider::handle:horizontal {{
     width: 16px; height: 16px; margin: -6px 0;
-    background: {TEXT}; border-radius: 8px;
+    background: {TEXT}; border-radius: {R_MD}px;
 }}
 
 /* Progress bars */
 QProgressBar {{
     background: {HOVER};
     border: none;
-    border-radius: 4px;
+    border-radius: {R_XS}px;
     height: 8px;
     text-align: center;
     color: transparent;
 }}
-QProgressBar::chunk {{ background: {GREEN}; border-radius: 4px; }}
+QProgressBar::chunk {{ background: {GREEN}; border-radius: {R_XS}px; }}
 QProgressBar[cls="thin"] {{ height: 6px; }}
 QProgressBar[error="true"]::chunk {{ background: {DANGER}; }}
 QProgressBar[warn="true"]::chunk {{ background: {WARNING}; }}
@@ -547,7 +582,7 @@ QLabel[cls="pack-title-compact"] {{
 QPlainTextEdit[cls="console"] {{
     background: {BG};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: {R_MD}px;
     font-family: "{MONO}";
     font-size: 11px;
     color: #D8DDE2;
@@ -567,7 +602,7 @@ QToolTip {{
     background: {HOVER2};
     color: {TEXT};
     border: 1px solid {BORDER2};
-    border-radius: 6px;
+    border-radius: {R_SM}px;
     padding: 4px 8px;
 }}
 """

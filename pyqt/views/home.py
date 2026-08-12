@@ -1,14 +1,23 @@
 """Home view — hero showcase of the selected pack + recently played + hardware."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-                             QScrollArea, QVBoxLayout, QWidget)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit,
+                             QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
                     icon_pixmap, label, pill, vbox)
 from icons import ICONS
+
+# Rotating example prompts shown when the hero field is empty (§26). They
+# seed a coherent brief — never a fake mod list.
+PROMPT_IDEAS = [
+    "A dark medieval RPG with dangerous bosses and magic.",
+    "Cozy farming and exploration for multiplayer.",
+    "Realistic survival that runs well on an 8 GB laptop.",
+    "Create-focused industrial civilization.",
+]
 
 
 class HomeView(QWidget):
@@ -26,6 +35,8 @@ class HomeView(QWidget):
         self.selected_id: str | None = None
         self.hardware = hardware
         self._hero_icon: QLabel | None = None
+        self._idea_idx = 0
+        self._idea_timer: QTimer | None = None
 
         outer = QScrollArea(self)
         outer.setWidgetResizable(True)
@@ -36,6 +47,53 @@ class HomeView(QWidget):
         outer.setWidget(body)
         self.root = vbox(body, 32, margins=(32, 32, 32, 32))
         self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # Signature prompt card — "What kind of Minecraft experience do you
+        # want?" (§24-25). Always first on Home so a new user knows what the
+        # product does within five seconds (§223). Seeding navigates to the
+        # AI Builder with the brief pre-filled.
+        self._prompt_card = card(body)
+        self._prompt_card.setProperty("cls", "search-panel")
+        theme.polish(self._prompt_card)
+        self._prompt_lay = vbox(self._prompt_card, 14, margins=(24, 20, 24, 20))
+        prompt_head = QHBoxLayout()
+        prompt_mark = QLabel(self._prompt_card)
+        prompt_mark.setPixmap(icon_pixmap("sparkles", theme.GREEN, 20))
+        prompt_head.addWidget(prompt_mark)
+        prompt_title = label(self._prompt_card, "What kind of Minecraft experience do you want?", "h2")
+        prompt_head.addWidget(prompt_title)
+        prompt_head.addStretch(1)
+        self._prompt_lay.addLayout(prompt_head)
+
+        prompt_row = QHBoxLayout()
+        prompt_row.setSpacing(10)
+        self._prompt = QPlainTextEdit(self._prompt_card)
+        self._prompt.setPlaceholderText(PROMPT_IDEAS[0])
+        self._prompt.setFixedHeight(64)
+        self._prompt.setStyleSheet(
+            f"QPlainTextEdit {{ background: {theme.HOVER}; border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.R_MD}px; padding: 8px 12px; font-size: {theme.T_BODY}px; }}"
+            f"QPlainTextEdit:focus {{ border: 1px solid rgba(57,184,106,0.5); }}"
+        )
+        prompt_row.addWidget(self._prompt, 1)
+        create = button(self._prompt_card, "CREATE EXPERIENCE", "btn-primary", "sparkles", theme.BG)
+        create.setMinimumSize(theme.H_LG + 130, theme.H_LG)
+        create.clicked.connect(self._create_from_prompt)
+        prompt_row.addWidget(create)
+        self._prompt_lay.addLayout(prompt_row)
+
+        self._prompt_hint = label(self._prompt_card,
+                                  "AI picks compatible mods, resolves dependencies, tests the game, and repairs crashes — just describe the experience.",
+                                  "muted")
+        self._prompt_hint.setWordWrap(True)
+        self._prompt_lay.addWidget(self._prompt_hint)
+        self.root.addWidget(self._prompt_card)
+
+        # Rotating suggestion when empty — slow (one idea per 6s, §26).
+        self._idea_timer = QTimer(self)
+        self._idea_timer.setInterval(6000)
+        self._idea_timer.timeout.connect(self._rotate_idea)
+        self._idea_timer.start()
 
         self._hero = QFrame(body)
         self._hero.setProperty("cls", "hero")
@@ -91,6 +149,19 @@ class HomeView(QWidget):
         lay = vbox(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(outer)
+
+    # ------------------------------------------------------------------
+    def _create_from_prompt(self) -> None:
+        """Seed the AI Builder with the typed brief (or a rotating idea if empty)."""
+        text = self._prompt.toPlainText().strip()
+        if not text:
+            text = PROMPT_IDEAS[self._idea_idx % len(PROMPT_IDEAS)]
+        self.seed_requested.emit(text)
+
+    def _rotate_idea(self) -> None:
+        """Slowly cycle the empty-field suggestion (§26 — never aggressive)."""
+        self._idea_idx = (self._idea_idx + 1) % len(PROMPT_IDEAS)
+        self._prompt.setPlaceholderText(PROMPT_IDEAS[self._idea_idx])
 
     # ------------------------------------------------------------------
     def _build_empty(self, parent: QWidget) -> QFrame:

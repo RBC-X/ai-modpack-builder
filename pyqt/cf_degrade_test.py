@@ -1,7 +1,8 @@
-"""CF-degradation test: a configured-but-broken CurseForge key must NOT break
-the visuals engines. With the (invalid) stored key, choose_shader /
-choose_resource_pack must warn, skip CF, and still return a real Modrinth pick
-with provider recorded — never a crash, never a fake.
+"""CF-degradation test: a broken CurseForge key must NOT break the visuals
+engines. An explicit invalid key exercises the degrade path: choose_shader /
+choose_resource_pack must warn, skip CF, and still return a real Modrinth
+pick with provider recorded — never a crash, never a fake. Deterministic
+regardless of whether a valid key is stored.
 
 Run: pyqt/.venv/Scripts/python pyqt/cf_degrade_test.py
 """
@@ -32,20 +33,19 @@ def check(name: str, cond: bool, extra: str = "") -> None:
 settings = SettingsStore()
 key = settings.curseforge_key()
 check("CF key configured (the stored one)", bool(key))
-if not key:
-    print("SKIP: no CF key configured")
-    sys.exit(0)
 
-# Build the exact provider set the pipeline uses (both sources, no direct CF).
+# Build the exact provider set the pipeline uses (both sources, no direct CF)
+# with the REAL stored key, so the visuals engines run their true path.
 providers = build_providers(settings, ["modrinth", "curseforge"])
 cf = next((p for p in providers if p.name == "curseforge"), None)
 check("curseforge provider present", cf is not None)
 check("curseforge marked available (key set)", bool(cf and cf.available))
 
-# The stored key is invalid — CF calls must raise a clear RuntimeError
-# (not a generic scope error), and the visuals engines must survive it.
+# Degrade path: an EXPLICIT invalid key (deterministic — never depends on
+# what is stored). CF calls must raise a clear RuntimeError (not a generic
+# scope error), and the visuals engines must survive it.
 from engine.providers.curseforge import CurseForgeProvider  # noqa: E402
-probe = CurseForgeProvider(api_key=key, allow_direct_downloads=False)
+probe = CurseForgeProvider(api_key="invalid-probe-key", allow_direct_downloads=False)
 try:
     probe.search({"query": "complementary", "projectType": "shader", "minecraftVersion": "1.20.1", "limit": 3})
     check("broken CF key surfaces an error", False, "no error raised?!")

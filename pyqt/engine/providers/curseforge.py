@@ -138,11 +138,14 @@ class CurseForgeProvider:
         qp["classId"] = str(cls)
         if opts.get("query"):
             qp["searchFilter"] = opts["query"]
-        else:
-            # Browse mode: rank by total downloads so an empty search shows the
-            # most popular projects.
-            qp["sortField"] = "6"
-            qp["sortOrder"] = "desc"
+        # Rank by total downloads in both browse AND query mode: the merged
+        # catalog (service.search) already re-sorts every source by downloads,
+        # so ranking each source the same way keeps the per-provider view and
+        # the merged view consistent — and the canonical mod (e.g. JEI) is not
+        # buried under fuzzy matches (CurseForge's default relevance sort is
+        # noisy). A caller that wants another order can pass opts["sort"].
+        qp["sortField"] = str(opts.get("sort", "6"))
+        qp["sortOrder"] = opts.get("sortOrder", "desc")
         if opts.get("minecraftVersion"):
             qp["gameVersion"] = opts["minecraftVersion"]
         loaders = opts.get("loaders") or []
