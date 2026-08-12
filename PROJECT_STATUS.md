@@ -23,6 +23,21 @@ _Generated 2026-08-10T22:33:50.581Z from real artifacts — never hand-edited._
 - **Reboot survival documented** (RELEASING.md): startup shortcut re-verified
   live (kill → logon-launch → feed back under fresh pid); the GitHub update
   path needs no local process; six honest gaps listed — none break updates.
+- **REAL reboot test PASSED** (2026-08-12): after an actual restart the HTTPS
+  mirror relaunched at logon (fresh pid, 1.0.6 feed over TLS) and the
+  installed launcher checked the public GitHub feed with no flags
+  (`appOk: true, appCurrent: 1.0.6, appAvailable: false`). Timing finding:
+  this machine's logon sequence is slow (Run key ~2 min post-boot, Startup
+  folder ~4 min), so the mirror is now ALSO in `HKCU\…\Run`
+  (`pyqt/register_runkey_feed.ps1`) — the proven-early path — with the
+  Startup-folder shortcut kept as redundancy.
+- **Jump-to-page verified in the installed 1.0.6 binary**: the frozen
+  `views.discover` module extracted from the installed exe's PYZ contains
+  the jump feature, and `pyqt/jump_visual_test.py` renders the real
+  DiscoverView (identical code), searches live, jumps to page 5
+  (`Page 5 · showing 385–432 of 3,259`, 0 overlap with page 1) and back,
+  saving before/after screenshots (`workspace/jump-page1.png`,
+  `workspace/jump-page5.png`).
 - **Regression**: pagination 40/40, engine_self_test 18/18, smoke PASS
   (rc=0), frozen selftest 6/6, installed-app selftest rc=0.
 
