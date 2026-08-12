@@ -4,25 +4,27 @@ _Generated 2026-08-10T22:33:50.581Z from real artifacts — never hand-edited._
 
 ## Latest verified work (2026-08-12, real runs)
 
-- **Discover jump-to-page + total-page estimate**: `pyqt/pagination_test.py`
-  **40/40 PASS** — "Page 2 · showing 49–96 of 3,259 (68 pages)" label,
-  jump-to-page-5/back via the spin box, disabled when the total is unknown,
-  programmatic updates inert.
-- **Update-feed mirror survives reboots**: registered as a Startup-folder
-  shortcut (`pyqt/register_startup_feed.ps1`); verified by killing the
-  running mirror and relaunching via the shortcut — feed came back on
-  `https://127.0.0.1:8543` (fresh pid, 1.0.5 served). `schtasks` is blocked
-  by machine policy, so the Startup folder is the logon hook.
-- **LIVE GitHub publish (DONE)**: gh 2.97.0 installed (winget) and authed as
-  RBC-X; public repo `github.com/RBC-X/ai-modpack-builder` created (release
-  assets only), README committed, signed 1.0.5 installer + `update.json`
-  uploaded to release `v1.0.5`. GitHub-downloaded installer SHA-256 matches
-  the feed (`1ce99156…88e0`, 29,241,584 bytes). The installed launcher's
-  state now points at `releases/latest/download/update.json`; its
-  `--check-update` against GitHub reports `ok: true, current: 1.0.5,
-  available: false` with **no insecure dev flag**.
-- **Regression**: engine_self_test 18/18, round2_verify PASS, smoke PASS
-  (rc=0).
+- **1.0.6 shipped in place via the LIVE GitHub feed**: the installed 1.0.5
+  app ran the full loop over `releases/latest/download/update.json` —
+  `available: true` → downloaded 29,233,848 bytes → SHA-256 `01d750b3…76`
+  verified → Authenticode verified → installed in place. Installed app is
+  now **1.0.6** (`available: false`, selftest 6/6 green incl. no-legacy-Node
+  and shader/RP-engines checks). Release carries the jump-to-page feature
+  (`pagination_test.py` 40/40).
+- **Update-path bug fixed**: `apply_installer` now pins `/DIR` to the
+  running app's folder in frozen builds (Inno's remembered-dir gotcha would
+  have sent the next GUI update into the build-verify scratch dir); verified
+  by simulation (frozen → real install dir, AMB_UPDATE_DIR still wins).
+- **Source pushed**: `github.com/RBC-X/ai-modpack-builder` main branch now
+  holds the full pyqt/ launcher + engine and docs with a `.gitignore` that
+  excludes workspace, installers, venv, secrets, logs, state, and
+  screenshots (secret-scanned before push). Remote keeps its slim public
+  README landing page.
+- **Reboot survival documented** (RELEASING.md): startup shortcut re-verified
+  live (kill → logon-launch → feed back under fresh pid); the GitHub update
+  path needs no local process; six honest gaps listed — none break updates.
+- **Regression**: pagination 40/40, engine_self_test 18/18, smoke PASS
+  (rc=0), frozen selftest 6/6, installed-app selftest rc=0.
 
 ## Automated test suite (real run)
 - 232 tests: **232 pass / 0 fail**

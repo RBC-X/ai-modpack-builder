@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import urllib.request
 import urllib.parse
 import re
@@ -169,13 +170,20 @@ def verify_authenticode(path: Path, expected_publisher: str = EXPECTED_PUBLISHER
 def apply_installer(path: Path, extra_dir: Optional[str] = None) -> subprocess.Popen:
     """Launch the downloaded installer in silent per-user update mode.
 
-    extra_dir (test hook, AMB_UPDATE_DIR) redirects the install target.
+    The target dir is always pinned with /DIR: Inno Setup remembers the last
+    /DIR used on the machine, so an unpinned silent install can silently
+    reinstall into a stale (e.g. test-scratch) directory. Precedence:
+    explicit extra_dir, then AMB_UPDATE_DIR (test hook), then the running
+    app's own folder in frozen builds (i.e. the real install dir).
     """
     if os.environ.get("AMB_UPDATE_ALLOW_UNSIGNED", "") != "1":
         verify_authenticode(path)
+    target = extra_dir or os.environ.get("AMB_UPDATE_DIR") or None
+    if not target and getattr(sys, "frozen", False):
+        target = str(Path(sys.executable).resolve().parent)
     args = [str(path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"]
-    if extra_dir:
-        args.append("/DIR=" + extra_dir)
+    if target:
+        args.append("/DIR=" + target)
     return subprocess.Popen(args, close_fds=True)
 
 

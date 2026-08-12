@@ -111,6 +111,16 @@ def main() -> int:
                 return 1
             print("repo created:", (r.stdout or r.stderr).strip())
 
+        # Re-publishing the same version (e.g. rebuilt installer, new SHA):
+        # drop the old release (keep the tag) so assets are replaced, not
+        # duplicated.
+        existing = subprocess.run(["gh", "release", "view", "-R", REPO, tag],
+                                  capture_output=True, text=True, timeout=60)
+        if existing.returncode == 0:
+            print(f"release {tag} exists — deleting and recreating with the new assets")
+            subprocess.run(["gh", "release", "delete", "-R", REPO, tag, "--yes"],
+                           capture_output=True, text=True, timeout=120)
+
         # Upload BOTH the installer and update.json as release assets — the
         # feed URL (releases/latest/download/update.json) only resolves when
         # the feed itself is an asset of the latest release. -R is required:

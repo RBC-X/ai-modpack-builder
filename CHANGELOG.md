@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-08-12 — 1.0.6 shipped to the installed launcher via the LIVE GitHub feed (verified)
+
+- **Jump-to-page + total-page estimate** ships in this release: the Discover
+  pager shows the real total-page estimate (`Page 2 · showing 49–96 of 3,259
+  (68 pages)`) with a **Jump to** spin box (arrows/Enter apply immediately;
+  disabled when the total is unknown; programmatic updates inert).
+  `pyqt/pagination_test.py` 40/40 PASS.
+- **The full auto-update loop ran over the public GitHub feed with no dev
+  flags**: the installed 1.0.5 app checked
+  `https://github.com/RBC-X/ai-modpack-builder/releases/latest/download/update.json`
+  → `available: true` → downloaded the signed 1.0.6 installer
+  (29,233,848 bytes) → **SHA-256 verified** (`01d750b3…76`) → Authenticode
+  verified → installed in place. The updated app reports
+  `current: 1.0.6, available: false` and its selftest is green (6/6,
+  including no-legacy-Node-files and shader/RP-engines checks).
+- **Real update-path bug fixed (would have bitten the next GUI update):**
+  `apply_installer` launched the installer WITHOUT `/DIR`, and Inno Setup
+  remembers the last dir used on the machine — after the build pipeline's
+  scratch-dir verify, an in-app update would have silently reinstalled into
+  the test dir. `apply_installer` now always pins `/DIR` to the running
+  app's own folder in frozen builds (AMB_UPDATE_DIR test hook still wins),
+  verified by simulation (frozen → real install dir; hook → hook dir).
+- **`publish_release.py` is now idempotent**: re-publishing the same version
+  (rebuilt installer, new SHA) deletes the old release and recreates it with
+  the new assets instead of failing on an existing tag.
+- **Source pushed to the public repo** (`github.com/RBC-X/ai-modpack-builder`,
+  main branch): the complete pyqt/ launcher + engine, docs, and the new
+  `.gitignore` (workspace, installers, venv, secrets, logs, state, screenshots
+  all excluded — verified no secrets in the pushed tree). The remote keeps
+  its slim public README as the landing page.
+- **Reboot survival of the update path documented** (RELEASING.md → Startup
+  survival): the mirror shortcut was re-verified live (kill → logon-launch →
+  feed back under a fresh pid), the GitHub path needs no local process, and
+  six honest gaps are listed (OneDrive hydration, silent pythonw failure,
+  dev-workspace path, etc.) — none break the primary GitHub update path.
+
 ## 2026-08-12 — LIVE GitHub release: 1.0.5 published, launcher pointed at public HTTPS feed (verified)
 
 - **Public repo created and released.** `gh` 2.97.0 installed via winget
