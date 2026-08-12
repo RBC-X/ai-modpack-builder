@@ -285,18 +285,26 @@ def label(parent: QWidget, text: str = "", cls: str = "sub") -> QLabel:
 
 
 def button(parent: QWidget, text: str = "", cls: str = "btn-dark", icon_name: Optional[str] = None,
-           icon_color: Optional[str] = None) -> QPushButton:
+           icon_color: Optional[str] = None, height: Optional[int] = None) -> QPushButton:
     b = QPushButton(text, parent)
     b.setProperty("cls", cls)
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     if icon_name:
         b.setIcon(icons.icon(icon_name, icon_color or (theme.GREEN if cls == "btn-primary" else theme.TEXT2)))
         b.setIconSize(b.iconSize().scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio))
+    # Shared height tokens: primary/danger actions default to H_MD so every
+    # screen's main call-to-action has the same touch target; compact rows
+    # pass a smaller H_* explicitly.
+    if height is None and cls in ("btn-primary", "btn-danger"):
+        height = theme.H_MD
+    if height:
+        b.setMinimumHeight(height)
     polish(b)
     return b
 
 
-def icon_btn(parent: QWidget, icon_name: str, tip: str = "", color: str = theme.TEXT2) -> QPushButton:
+def icon_btn(parent: QWidget, icon_name: str, tip: str = "", color: str = theme.TEXT2,
+             size: Optional[int] = None) -> QPushButton:
     b = QPushButton(parent)
     b.setProperty("cls", "iconbtn")
     b.setIcon(icons.icon(icon_name, color))
@@ -304,12 +312,16 @@ def icon_btn(parent: QWidget, icon_name: str, tip: str = "", color: str = theme.
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     if tip:
         b.setToolTip(tip)
+    # Square icon buttons share H_SM unless a call site asks for a bigger one
+    # (e.g. the home hero's 48px instance control).
+    b.setFixedSize(size or theme.H_SM, size or theme.H_SM)
     polish(b)
     return b
 
 
 def pill(parent: QWidget, text: str, active: bool = False, cls: str = "pill",
-         icon_name: Optional[str] = None, icon_color: Optional[str] = None) -> QPushButton:
+         icon_name: Optional[str] = None, icon_color: Optional[str] = None,
+         height: Optional[int] = None) -> QPushButton:
     # Ampersands are literal product text here, never keyboard-mnemonic
     # markers (for example "Create & Automate").
     b = QPushButton(text.replace("&", "&&"), parent)
@@ -320,6 +332,8 @@ def pill(parent: QWidget, text: str, active: bool = False, cls: str = "pill",
     if icon_name:
         b.setIcon(icons.icon(icon_name, icon_color or theme.TEXT2, 14))
         b.setIconSize(b.iconSize().scaled(14, 14, Qt.AspectRatioMode.KeepAspectRatio))
+    if height:
+        b.setMinimumHeight(height)
     polish(b)
     return b
 

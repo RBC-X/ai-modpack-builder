@@ -208,6 +208,7 @@ class ActivityView(QWidget):
 
         self._body = QFrame(body)
         self._body.setFixedWidth(960)
+        self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._body_lay = vbox(self._body, 10)
         self.root.addWidget(self._body, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -240,6 +241,37 @@ class ActivityView(QWidget):
         else:
             self._repairs()
 
+    def _loading_state(self, rows: int = 4) -> QFrame:
+        """Composed skeleton while the async feed loads — the tab body must
+        never read as a dead band (audit §4). Uses the theme's skeleton cls;
+        real content replaces it once the async result lands."""
+        sk = card(self._body)
+        sk.setProperty("cls", "skeleton")
+        theme.polish(sk)
+        sk_lay = vbox(sk, 12, margins=(22, 18, 22, 18))
+        head = QHBoxLayout()
+        bar = QFrame(sk)
+        bar.setProperty("cls", "skeleton")
+        bar.setFixedSize(180, 16)
+        theme.polish(bar)
+        head.addWidget(bar)
+        head.addStretch(1)
+        sk_lay.addLayout(head)
+        for _ in range(rows):
+            row = QHBoxLayout()
+            dot = QFrame(sk)
+            dot.setProperty("cls", "skeleton")
+            dot.setFixedSize(16, 16)
+            theme.polish(dot)
+            row.addWidget(dot)
+            line = QFrame(sk)
+            line.setProperty("cls", "skeleton")
+            line.setFixedHeight(13)
+            theme.polish(line)
+            row.addWidget(line, 1)
+            sk_lay.addLayout(row)
+        return sk
+
     def _empty_state(self, title: str, copy: str, icon_name: str = "activity") -> QFrame:
         empty = card(self._body)
         empty.setProperty("cls", "empty-state")
@@ -259,7 +291,9 @@ class ActivityView(QWidget):
         return empty
 
     def _feed(self) -> None:
-        self._body_lay.addWidget(label(self._body, "Loading engine events…", "muted"))
+        sk = self._loading_state()
+        sk.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._body_lay.addWidget(sk)
 
         def fetch():
             return list(self.api.events("", idle_timeout=1.5))[:120]
@@ -274,6 +308,7 @@ class ActivityView(QWidget):
                 ))
                 return
             history = card(self._body)
+            history.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             history_lay = vbox(history, 10, margins=(22, 18, 22, 18))
             history_lay.addWidget(label(history, "EXECUTION HISTORY", "h3"))
             for ev in reversed(evs):
@@ -294,6 +329,8 @@ class ActivityView(QWidget):
         run_async(fetch, ok, lambda e: self._body_lay.addWidget(label(self._body, f"[{e}]", "muted")))
 
     def _engine_logs(self) -> None:
+        self._body_lay.addWidget(self._loading_state(rows=5))
+
         def fetch():
             return list(self.api.events("", idle_timeout=1.5))[:400]
 
@@ -319,7 +356,7 @@ class ActivityView(QWidget):
         run_async(fetch, ok, None)
 
     def _crashes(self) -> None:
-        self._body_lay.addWidget(label(self._body, "Scanning pack launch states…", "muted"))
+        self._body_lay.addWidget(self._loading_state(rows=3))
 
         def fetch():
             builds = self.api.builds()
@@ -380,6 +417,8 @@ class ActivityView(QWidget):
         run_async(fetch, ok, None)
 
     def _repairs(self) -> None:
+        self._body_lay.addWidget(self._loading_state(rows=3))
+
         def fetch():
             builds = self.api.builds()
             repairs = []

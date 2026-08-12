@@ -50,16 +50,16 @@ class AIBuilderView(QWidget):
 
         # Header
         header = QWidget(body)
-        header.setFixedHeight(170)
-        head = vbox(header, 12, margins=(0, 16, 0, 0))
+        header.setFixedHeight(150)
+        head = vbox(header, 10, margins=(0, 14, 0, 0))
         head.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         mark = QFrame(header)
         mark.setProperty("cls", "logo-badge")
-        mark.setFixedSize(48, 48)
+        mark.setFixedSize(44, 44)
         theme.polish(mark)
         mark_lay = vbox(mark, 0, margins=0)
         ic = QLabel(mark)
-        ic.setPixmap(icon_pixmap("sparkles", theme.GREEN, 24))
+        ic.setPixmap(icon_pixmap("sparkles", theme.GREEN, 22))
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mark_lay.addWidget(ic)
         head.addWidget(mark, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -68,13 +68,13 @@ class AIBuilderView(QWidget):
         head.addWidget(t)
         self._source_desc = label(header, "Describe what you want to play. Loading the engine's configured providers…", "sub")
         self._source_desc.setWordWrap(True)
-        self._source_desc.setFixedWidth(560)
+        self._source_desc.setFixedWidth(720)
         self._source_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         head.addWidget(self._source_desc)
         self.root.addWidget(header)
 
         self._input_card = card(body)
-        self._input_card.setFixedWidth(832)
+        self._input_card.setFixedWidth(960)
         self._input_card.setFixedHeight(232)
         self._input_lay = vbox(self._input_card, 12, margins=(16, 16, 16, 16))
         self._prompt = QTextEdit(self._input_card)
@@ -106,7 +106,7 @@ class AIBuilderView(QWidget):
         self._input_lay.addLayout(chip_rows)
 
         self._settings_card = card(body)
-        self._settings_card.setFixedWidth(832)
+        self._settings_card.setFixedWidth(960)
         self._settings_card.setFixedHeight(116)
         self._settings_lay = vbox(self._settings_card, 12, margins=(16, 14, 16, 14))
         toprow = QHBoxLayout()
@@ -195,14 +195,14 @@ class AIBuilderView(QWidget):
 
         # Build timeline card
         self._timeline_card = card(body)
-        self._timeline_card.setFixedWidth(832)
+        self._timeline_card.setFixedWidth(960)
         self._timeline_lay = vbox(self._timeline_card, 10, margins=(20, 16, 20, 16))
         self._timeline_card.setVisible(False)
         self.root.addWidget(self._timeline_card, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # Completed card
         self._done_card = card(body)
-        self._done_card.setFixedWidth(832)
+        self._done_card.setFixedWidth(960)
         self._done_lay = vbox(self._done_card, 14, margins=(30, 26, 30, 26))
         self._done_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._done_card.setVisible(False)

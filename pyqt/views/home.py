@@ -466,8 +466,6 @@ class HomeView(QWidget):
         col.addWidget(meta2)
         row.addLayout(col, 1)
         play = icon_btn(c, "play", "Play instance", theme.GREEN)
-        play.setProperty("cls", "iconbtn")
-        play.setStyleSheet(f"QPushButton[cls=\"iconbtn\"] {{ background: {theme.HOVER}; border: 1px solid {theme.BORDER}; border-radius: 8px; padding: 8px; }}")
         play.clicked.connect(lambda: self.play_requested.emit(b.get("buildId")))
         row.addWidget(play, 0, Qt.AlignmentFlag.AlignVCenter)
 
