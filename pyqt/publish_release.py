@@ -2,6 +2,7 @@
 
 Usage:
     pyqt/.venv/Scripts/python pyqt/publish_release.py [--version 1.0.5] [--repo OWNER/REPO] [--tag v1.0.5]
+    ... [--assets DIR]      upload every file in DIR (e.g. the screenshots/ gallery) as release assets
 
 What it does:
   1. Computes the installer's real SHA-256.
@@ -30,6 +31,7 @@ ROOT = HERE.parent
 
 VERSION = "1.0.5"
 REPO = os.environ.get("GH_REPO", "").strip()
+ASSETS_DIR = ""
 
 
 def sha256_of(path: Path) -> str:
@@ -52,12 +54,14 @@ def gh_authed() -> bool:
 
 
 def main() -> int:
-    global VERSION, REPO
+    global VERSION, REPO, ASSETS_DIR
     args = sys.argv[1:]
     if "--version" in args:
         VERSION = args[args.index("--version") + 1]
     if "--repo" in args:
         REPO = args[args.index("--repo") + 1]
+    if "--assets" in args:
+        ASSETS_DIR = args[args.index("--assets") + 1]
 
     setup = ROOT / "installers" / f"AI-Modpack-Builder-Setup-{VERSION}.exe"
     if not setup.exists():
@@ -127,6 +131,11 @@ def main() -> int:
         # without a local git repo gh cannot infer the owner/repo.
         release_args = ["gh", "release", "create", "-R", REPO, tag, str(setup), str(feed_path),
                         "--title", f"AI Modpack Builder {VERSION}"]
+        if ASSETS_DIR:
+            assets = sorted(Path(ASSETS_DIR).glob("*.png")) if Path(ASSETS_DIR).is_dir() else []
+            for asset in assets:
+                release_args.append(str(asset))
+            print(f"extra assets: {len(assets)} images from {ASSETS_DIR}")
         notes_file = ROOT / "RELEASING.md"
         if notes_file.exists():
             release_args += ["--notes-file", str(notes_file)]
