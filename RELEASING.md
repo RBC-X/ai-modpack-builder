@@ -72,8 +72,8 @@ release's `latest/download` URL).
   the app on this machine (and anyone who sets the feed URL) updates in place.
 
 After that every future release flows to the launcher automatically:
-bump `APP_VERSION`, rebuild, publish, done — no manual installs. (The
-jump-to-page feature is the next release — 1.0.6 — through this same feed.)
+bump `APP_VERSION`, rebuild, publish, done — no manual installs. (Proven
+live: 1.0.5 → 1.0.6 installed itself in place over this feed on 2026-08-12.)
 
 ## Verify the loop
 
