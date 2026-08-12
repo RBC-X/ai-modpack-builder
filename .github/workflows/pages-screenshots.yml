@@ -39,6 +39,17 @@ jobs:
           AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
         run: python pyqt/seed_ci_build.py
 
+      - name: Run fast engine test suites (fail the job on any regression)
+        env:
+          AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -e
+          python pyqt/identity_snapshots_test.py
+          python pyqt/health_concepts_test.py
+          python pyqt/identity_ui_test.py
+          python pyqt/smoke_test.py
+
       - name: Regenerate screenshots (offscreen render, real engine data)
         env:
           AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
@@ -50,7 +61,11 @@ jobs:
           AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
         run: |
           set -e
-          for f in 01-home 02-library 03-pack-overview 07-discover 08-ai-builder 12-launch-overlay; do
+          for f in \
+            01-home 02-library 03-pack-overview 04-pack-content 05-pack-logs \
+            06-pack-settings 07-discover 07b-discover-details 08-ai-builder \
+            09-downloads 10-activity 11-settings 11b-provider-settings \
+            11c-account-settings 11d-account-dialog 12-launch-overlay; do
             cp "pyqt/screenshots/$f.png" "screenshots/$f.png"
           done
           git add screenshots

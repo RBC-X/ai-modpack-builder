@@ -28,12 +28,14 @@ The whole engine runs inside the app — no Node server, no localhost.
 
 ## Screenshots
 
-Captured from the running app (offscreen render, real engine data):
+Captured from the running app (offscreen render, real engine data, regenerated on every push):
 
-| | | |
-|---|---|---|
-| ![Home](screenshots/01-home.png) | ![Library](screenshots/02-library.png) | ![Pack overview](screenshots/03-pack-overview.png) |
-| ![Discover](screenshots/07-discover.png) | ![AI Builder](screenshots/08-ai-builder.png) | ![Launch](screenshots/12-launch-overlay.png) |
+| | | | |
+|---|---|---|---|
+| ![Home](screenshots/01-home.png) | ![Library](screenshots/02-library.png) | ![Pack overview](screenshots/03-pack-overview.png) | ![Pack content](screenshots/04-pack-content.png) |
+| ![Pack logs](screenshots/05-pack-logs.png) | ![Pack settings](screenshots/06-pack-settings.png) | ![Discover](screenshots/07-discover.png) | ![Discover details](screenshots/07b-discover-details.png) |
+| ![AI Builder](screenshots/08-ai-builder.png) | ![Downloads](screenshots/09-downloads.png) | ![Activity](screenshots/10-activity.png) | ![Settings](screenshots/11-settings.png) |
+| ![Provider settings](screenshots/11b-provider-settings.png) | ![Account settings](screenshots/11c-account-settings.png) | ![Account dialog](screenshots/11d-account-dialog.png) | ![Launch overlay](screenshots/12-launch-overlay.png) |
 
 ## What it does
 
