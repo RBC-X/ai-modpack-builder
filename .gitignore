@@ -1,6 +1,7 @@
 # ---- Runtime data & secrets (NEVER commit these) ----
 workspace/
 pyqt/.secrets/
+pyqt/_amb_secrets.py
 *.dpapi
 *.pem
 *.key

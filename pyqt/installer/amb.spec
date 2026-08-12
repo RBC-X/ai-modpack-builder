@@ -19,7 +19,7 @@ a = Analysis(
         (str(ROOT / "assets"), "assets"),   # fonts (Inter, JetBrains Mono)
         (str(ROOT / "app.ico"), "."),       # window/taskbar icon
     ],
-    hiddenimports=[],
+    hiddenimports=["_amb_secrets"],  # build-time generated, git-ignored (may be absent)
     hookspath=[],
     runtime_hooks=[],
     excludes=[

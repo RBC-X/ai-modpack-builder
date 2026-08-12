@@ -1665,6 +1665,21 @@ def main() -> int:
                         missing_mods.append(_mod)
                 res["checks"].append({"name": "shader/resource-pack engine importable",
                                       "ok": not missing_mods, "missing": missing_mods})
+                # Zero-config provider promise: a fresh install has no per-user
+                # CurseForge key, so the publisher-embedded default must resolve
+                # (Modrinth needs no key at all). Source labels are reported so
+                # a machine with a stored per-user key still passes honestly.
+                try:
+                    from engine.providers.settings import SettingsStore
+                    src = SettingsStore().curseforge_key_source()
+                    res["checks"].append({
+                        "name": "curseforge key resolves",
+                        "ok": bool(src) and src != "none",
+                        "source": src,
+                    })
+                except Exception as _ke:  # noqa: BLE001
+                    res["checks"].append({"name": "curseforge key resolves",
+                                          "ok": False, "error": str(_ke)})
             res["ok"] = all(c["ok"] for c in res["checks"])
         except Exception as e:  # noqa: BLE001
             res["error"] = str(e)

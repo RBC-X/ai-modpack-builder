@@ -21,11 +21,22 @@ MICROSOFT_CLIENT_ID = os.environ.get("MINECRAFT_CLIENT_ID", EMBEDDED_MICROSOFT_C
 # DPAPI store (Settings page) -> this embedded default.
 #
 # NEVER commit a live key here: this file is tracked, so the committed value
-# is always empty. build_installer.py injects the real key from the git-ignored
-# pyqt/.secrets/curseforge-key.txt (or the AMB_EMBEDDED_CURSEFORGE_KEY env) as
-# AMB_EMBEDDED_CURSEFORGE_KEY while invoking PyInstaller, so only the frozen
-# bundle carries it.
-EMBEDDED_CURSEFORGE_KEY = os.environ.get("AMB_EMBEDDED_CURSEFORGE_KEY", "").strip()
+# is always empty. build_installer.py generates the git-ignored pyqt/_amb_secrets.py
+# containing the literal key before invoking PyInstaller, so only the frozen
+# bundle carries it (an env var alone would NOT survive into the frozen app —
+# os.environ is read at runtime, not bake time).
+def _embedded_cf_key() -> str:
+    env_key = os.environ.get("AMB_EMBEDDED_CURSEFORGE_KEY", "").strip()
+    if env_key:
+        return env_key
+    try:
+        from _amb_secrets import CURSEFORGE_KEY  # type: ignore[import-not-found]
+        return (CURSEFORGE_KEY or "").strip()
+    except Exception:  # noqa: BLE001 — dev trees / fresh clones have no secrets module
+        return ""
+
+
+EMBEDDED_CURSEFORGE_KEY = _embedded_cf_key()
 
 # Single source of truth for the shipped build version. The installer
 # pipeline (pyqt/build_installer.py) reads this for the Inno Setup
