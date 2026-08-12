@@ -459,6 +459,7 @@ class MainWindow(QMainWindow):
         self.home.navigate.connect(self._set_nav)
         self.home.import_requested.connect(self.import_modal.show)
         self.home.select_build.connect(self._select_build)
+        self.home.seed_requested.connect(self._seed_ai_builder)
 
         self.library.play_requested.connect(self.play)
         self.library.stop_requested.connect(self.stop)
@@ -766,6 +767,11 @@ class MainWindow(QMainWindow):
         self._selected_id = build_id
         self.home.selected_id = build_id
         self.library.selected_id = build_id
+
+    def _seed_ai_builder(self, prompt: str) -> None:
+        """A starter concept / Surprise Me brief seeds the AI Builder prompt."""
+        self.aibuilder.seed_prompt(prompt)
+        self._set_nav("ai-builder")
 
     # ------------------------------------------------------------------
     def _set_nav(self, nav: str) -> None:

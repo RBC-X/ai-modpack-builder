@@ -216,6 +216,13 @@ class AIBuilderView(QWidget):
         self._load_hardware()
 
     # ------------------------------------------------------------------
+    def seed_prompt(self, prompt: str) -> None:
+        """Pre-fill the request from a starter concept / Surprise Me brief."""
+        prompt = (prompt or "").strip()
+        if prompt:
+            self._prompt.setPlainText(prompt)
+            self._build_btn.setEnabled(True)
+
     def _load_hardware(self) -> None:
         def fetch():
             return self.api.hardware(), self.api.settings_get()

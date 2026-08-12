@@ -330,6 +330,7 @@ class PackDetailView(QWidget):
     # -- Overview ------------------------------------------------------
     def _tab_overview(self) -> None:
         r = self.record or {}
+        self._body_lay.addWidget(self._health_card())
         grid = QHBoxLayout()
         grid.setSpacing(24)
 
@@ -352,6 +353,144 @@ class PackDetailView(QWidget):
 
         grid.addWidget(self._specs_card(), 33)
         self._body_lay.addLayout(grid)
+
+    # -- Pack Health (explainable score) -------------------------------
+    def _health_card(self):
+        """Persistent health dashboard: status + weighted, explainable score.
+
+        Every metric is a deterministic function of the real record (test
+        result, conflicts, perf estimate, content, identity, update check)
+        plus the Last Known Good snapshot and this machine's hardware. Each
+        metric has a Why popup with the exact reasons.
+        """
+        c = card(self._body)
+        self._health_lay = vbox(c, 10, margins=(20, 16, 20, 16))
+        self._health_metrics_lay = QVBoxLayout()
+        self._health_flags_lay = QVBoxLayout()
+        self._health_actions = QHBoxLayout()
+        self._health_lay.addWidget(label(c, "Calculating pack health…", "muted"))
+        self._health = None
+
+        from common import run_async
+
+        def fetch():
+            return self.api.pack_health(self.build_id) if self.build_id else {}
+
+        def ok(h):
+            if self._tab != "overview":
+                return
+            self._health = h
+            clear_layout(self._health_lay)
+            self._fill_health(c, h)
+
+        def err(e):
+            print(f"[packdetail-health] {e}", flush=True)
+
+        run_async(fetch, ok, err)
+        return c
+
+    def _fill_health(self, c, h: dict) -> None:
+        lay = self._health_lay
+        status = h.get("statusLabel") or "Unknown"
+        color_cls = h.get("statusColor") or "muted"
+        score = h.get("score", 0)
+
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.addWidget(label(c, "Pack Health", "h3"))
+        head.addStretch(1)
+        st = label(c, f"{status} · {score}/100", "mono")
+        st.setProperty("cls", f"mono {color_cls}")
+        theme.polish(st)
+        head.addWidget(st)
+        lay.addLayout(head)
+
+        for key in ("stability", "compatibility", "performance", "content", "theme", "maintenance"):
+            m = (h.get("metrics") or {}).get(key)
+            if not m:
+                continue
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addWidget(label(c, m.get("label", key), "sub"), 1)
+            bar = progress(c, int(m.get("score") or 0), thin=True)
+            s = int(m.get("score") or 0)
+            if s < 40:
+                bar.setProperty("error", "true")
+            elif s < 60:
+                bar.setProperty("warn", "true")
+            theme.polish(bar)
+            bar.setFixedWidth(150)
+            row.addWidget(bar)
+            row.addWidget(label(c, str(s), "mono"))
+            why = icon_btn(c, "info", f"Why {m.get('label')} {s}?", theme.MUTED)
+            why.setFixedSize(26, 26)
+            why.clicked.connect(lambda _=False, m=m: self._why_metric(m))
+            row.addWidget(why)
+            lay.addLayout(row)
+
+        flags = h.get("flags") or []
+        if flags:
+            lay.addSpacing(4)
+            for fl in flags:
+                frow = QHBoxLayout()
+                frow.setSpacing(8)
+                sev = fl.get("severity") or "info"
+                ic = QLabel(c)
+                ic.setPixmap(icon_pixmap(
+                    "alert" if sev in ("error", "warning") else "info",
+                    theme.DANGER if sev == "error" else theme.WARNING if sev == "warning" else theme.BLUE, 14))
+                frow.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
+                txt = label(c, fl.get("text") or "", "small")
+                txt.setWordWrap(True)
+                frow.addWidget(txt, 1)
+                lay.addLayout(frow)
+
+        # Actions: real update check + restore LKG on a broken/problem pack.
+        lay.addSpacing(6)
+        act = QHBoxLayout()
+        act.setSpacing(10)
+        upd = button(c, "CHECK MOD UPDATES", "btn-dark", "refresh")
+        upd.clicked.connect(self._check_updates)
+        act.addWidget(upd)
+        sig = h.get("signals") or {}
+        if sig.get("hasLkg") and h.get("status") in ("broken", "problems"):
+            rb = button(c, "↺ RESTORE LAST KNOWN GOOD", "btn-danger", "refresh")
+            rb.clicked.connect(self._restore_lkg)
+            act.addWidget(rb)
+        act.addStretch(1)
+        up_note = (f"{sig.get('updatesAvailable', 0)} update(s) known"
+                   if sig.get("updatesCheckedAt") else "Update check not run yet")
+        act.addWidget(label(c, up_note, "muted"))
+        lay.addLayout(act)
+        lay.addWidget(label(c, "Score is computed from real test results, the Last Known Good snapshot, "
+                              "conflict scans, the performance estimate, pack content and mod-update data — "
+                              "click the info icon on any metric for the exact reasons.", "muted"))
+
+    def _why_metric(self, m: dict) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+        reasons = m.get("reasons") or []
+        body = "\n".join(f"• {r}" for r in reasons) or "No recorded reasons."
+        QMessageBox.information(
+            self, f"Why {m.get('label')} {m.get('score')}?",
+            f"{m.get('label')} scores {m.get('score')}/100 (weight {int((m.get('weight') or 0) * 100)}% of the overall score).\n\n{body}",
+        )
+
+    def _check_updates(self) -> None:
+        from common import run_async
+        if not self.build_id:
+            return
+
+        def fetch():
+            return self.api.check_pack_updates(self.build_id)
+
+        def ok(res):
+            if self.build_id:
+                self.status_changed.emit(self.build_id)
+
+        def err(e):
+            print(f"[packdetail-updates] {e}", flush=True)
+
+        run_async(fetch, ok, err)
 
     def _modifications_card(self):
         r = self.record or {}

@@ -18,6 +18,7 @@ class HomeView(QWidget):
     navigate = pyqtSignal(str)
     import_requested = pyqtSignal()
     select_build = pyqtSignal(str)
+    seed_requested = pyqtSignal(str)      # composed concept brief → AI Builder
 
     def __init__(self, hardware: dict | None = None):
         super().__init__()
@@ -46,6 +47,12 @@ class HomeView(QWidget):
         hero_out.setContentsMargins(0, 0, 0, 0)
         hero_out.addWidget(self._hero_inner)
         self.root.addWidget(self._hero)
+
+        # Starter experiences — curated, editable concept templates that seed
+        # the AI Builder (always visible, even on an empty library).
+        self._starter_section = QWidget(body)
+        self._build_starter_section()
+        self.root.addWidget(self._starter_section)
 
         # Keep the outer 32px section rhythm while using the reference's
         # tighter 16px gap between the recent heading and its cards.
@@ -116,6 +123,120 @@ class HomeView(QWidget):
         inner.addLayout(row)
         c.setVisible(False)
         return c
+
+    # ------------------------------------------------------------------
+    # Starter experiences + Surprise Me
+    # ------------------------------------------------------------------
+    def _build_starter_section(self) -> None:
+        import engine.concepts as concepts
+        lay = vbox(self._starter_section, 14, margins=0)
+        header = QWidget(self._starter_section)
+        head = hbox(header, 8, margins=0)
+        head.addWidget(label(header, "Starter Experiences", "h2"))
+        head.addStretch(1)
+        surprise = button(header, "SURPRISE ME", "btn-primary", "sparkles", theme.BG)
+        surprise.setToolTip("Roll a fresh, coherent creative concept you can edit before building.")
+        surprise.clicked.connect(self._surprise_me)
+        head.addWidget(surprise)
+        lay.addWidget(header)
+        grid = QGridLayout()
+        grid.setSpacing(14)
+        for i, c in enumerate(concepts.STARTER_CONCEPTS):
+            grid.setColumnStretch(i % 3, 1)
+            grid.addWidget(self._concept_card(c), i // 3, i % 3)
+        lay.addLayout(grid)
+
+    def _concept_card(self, concept: dict) -> QFrame:
+        c = card(self._starter_section, hover=True)
+        c.setMinimumHeight(138)
+        c.setCursor(Qt.CursorShape.PointingHandCursor)
+        row = hbox(c, 12, margins=(16, 14, 16, 14))
+        ic = QLabel(c)
+        ic.setFixedSize(40, 40)
+        ic.setPixmap(icon_pixmap(concept.get("icon") or "sparkles", theme.GREEN, 22))
+        row.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
+        col = vbox(c, 3)
+        t = label(c, concept.get("title") or "?", "h3")
+        col.addWidget(t)
+        tag = label(c, concept.get("tagline") or "", "muted")
+        tag.setWordWrap(True)
+        col.addWidget(tag)
+        use = label(c, "Use template →", "small green")
+        use.setStyleSheet(f"QLabel {{ color: {theme.GREEN}; font-weight: 600; }}")
+        col.addWidget(use)
+        row.addLayout(col, 1)
+        c.mousePressEvent = lambda e, cp=concept: self._open_concept_editor(cp)
+        return c
+
+    def _surprise_me(self) -> None:
+        import engine.concepts as concepts
+        concept = concepts.surprise_me(hardware=self.hardware)
+        self._open_concept_editor(concept, rollable=True)
+
+    def _open_concept_editor(self, concept: dict, rollable: bool = False) -> None:
+        """Editable concept preview: brief + prompt; BUILD seeds the AI Builder."""
+        from PyQt6.QtWidgets import QDialog, QPlainTextEdit, QScrollArea
+        import engine.concepts as concepts
+        d = QDialog(self)
+        d.setWindowTitle("Starter experience")
+        d.setStyleSheet(f"QDialog {{ background: {theme.CARD}; }}")
+        d.resize(640, 600)
+        dlay = vbox(d, 12, margins=(22, 18, 22, 18))
+        self._ce_title = label(d, "", "h2")
+        self._ce_title.setWordWrap(True)
+        dlay.addWidget(self._ce_title)
+        self._ce_tagline = label(d, "", "muted")
+        self._ce_tagline.setWordWrap(True)
+        dlay.addWidget(self._ce_tagline)
+
+        scroll = QScrollArea(d)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setFixedHeight(230)
+        brief_host = QWidget()
+        self._ce_brief = vbox(brief_host, 6, margins=(2, 2, 2, 2))
+        scroll.setWidget(brief_host)
+        dlay.addWidget(scroll)
+
+        dlay.addWidget(label(d, "Prompt sent to the AI builder (edit freely):", "muted"))
+        self._ce_prompt = QPlainTextEdit(d)
+        self._ce_prompt.setMinimumHeight(120)
+        dlay.addWidget(self._ce_prompt, 1)
+        self._ce_note = label(d, "The brief is a template — you can change anything before building.", "muted")
+        dlay.addWidget(self._ce_note)
+
+        def apply(c: dict) -> None:
+            self._ce_title.setText(c.get("title") or "")
+            tag = c.get("tagline") or ""
+            if c.get("seedConcept"):
+                tag = c["seedConcept"]
+            self._ce_tagline.setText(tag)
+            clear_layout(self._ce_brief)
+            for lab, val in concepts.brief_lines(c):
+                row = QHBoxLayout()
+                row.setSpacing(8)
+                row.addWidget(label(brief_host, lab, "muted"))
+                row.addStretch(1)
+                row.addWidget(label(brief_host, val, "small"), 3)
+                self._ce_brief.addLayout(row)
+            self._ce_prompt.setPlainText(c.get("prompt") or "")
+
+        apply(concept)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = button(d, "Cancel", "btn-dark")
+        cancel.clicked.connect(d.reject)
+        row.addWidget(cancel)
+        if rollable:
+            reroll = button(d, "RE-ROLL", "btn-dark", "refresh")
+            reroll.clicked.connect(lambda: apply(concepts.surprise_me(hardware=self.hardware)))
+            row.addWidget(reroll)
+        go = button(d, "BUILD WITH AI", "btn-primary", "sparkles", theme.BG)
+        go.clicked.connect(lambda: (self.seed_requested.emit(self._ce_prompt.toPlainText().strip()),
+                                    d.accept()))
+        row.addWidget(go)
+        dlay.addLayout(row)
+        d.exec()
 
     # ------------------------------------------------------------------
     def set_hardware(self, hardware: dict | None) -> None:

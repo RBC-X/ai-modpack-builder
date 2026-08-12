@@ -50,6 +50,7 @@ from .snapshots import (create_snapshot, list_snapshots, load_snapshot,
                         last_known_good as _lkg_snapshot, mark_last_known_good,
                         restore_from_snapshot)
 from .plan import plan_change
+from .health import pack_health
 from .jarmeta import essential_libraries, norm_id
 from .jarname import invalid_module_reason, find_invalid_module_jar
 
@@ -582,6 +583,70 @@ class PyEngine:
         if not lkg:
             raise KeyError("no last known good snapshot")
         return self.restore_snapshot(build_id, lkg["snapshotId"], "Last Known Good")
+
+    def pack_health(self, build_id: str) -> dict:
+        """Explainable health report — status + weighted score from the real
+        record, the LKG snapshot on disk and the machine's hardware."""
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        rec = self._attach_identity(rec)
+        return pack_health(rec, self._build_dir(build_id), self.hardware().get("effective"))
+
+    def check_pack_updates(self, build_id: str, limit: int = 40) -> dict:
+        """Real, bounded update check: query each provider for the newest
+        version of every selected mod and compare version ids against what the
+        pack has. Results persist on the record (healthUpdates) so the health
+        dashboard's Maintenance score reflects reality, not guesses."""
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        req = rec.get("requirements") or {}
+        mc = req.get("minecraftVersion") or "1.20.1"
+        loader = req.get("loader") or "fabric"
+        settings = self.settings_store.load()
+        build_cfg = settings.get("build") or {}
+        sources = build_cfg.get("sources") or settings.get("defaults", {}).get("sources") or ["modrinth"]
+        providers = {p.name: p for p in build_providers(self.settings_store, sources) if p.available}
+        mods = [s for s in (rec.get("selections") or [])
+                if s.get("selected", True) and s.get("projectType") == "mod"
+                and s.get("provider") and s.get("projectId") and s.get("versionId")]
+        available = []
+        checked = 0
+        errors = 0
+        for s in mods[:limit]:
+            prov = providers.get(s["provider"])
+            if not prov:
+                continue
+            try:
+                versions = prov.get_versions(s["projectId"], {
+                    "minecraftVersion": mc, "loaders": [loader],
+                })
+                checked += 1
+            except Exception:  # noqa: BLE001
+                errors += 1
+                continue
+            if not versions:
+                continue
+            newest = versions[0]
+            if newest.get("versionId") and newest["versionId"] != s.get("versionId"):
+                available.append({
+                    "provider": s["provider"], "slug": s.get("slug"),
+                    "title": s.get("title") or s.get("slug"),
+                    "currentVersion": s.get("versionNumber"),
+                    "latestVersion": newest.get("versionNumber"),
+                    "latestVersionId": newest.get("versionId"),
+                    "publishedAt": newest.get("datePublished") or newest.get("date_published"),
+                })
+        rec["healthUpdates"] = {
+            "checkedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "count": len(available), "checked": checked, "errors": errors,
+            "available": available,
+        }
+        rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._write_record(rec)
+        return {"ok": True, "count": len(available), "checked": checked,
+                "errors": errors, "available": available}
 
     def plan_ai_change(self, build_id: str, prompt: str) -> dict:
         """Non-mutating AI change plan for a conversational request."""

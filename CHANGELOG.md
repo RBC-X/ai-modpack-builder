@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-08-12 — Starter concepts + Surprise Me + Pack Health dashboard
+
+- **Starter experiences on Home** (`engine/concepts.py`): six curated,
+  editable concept templates (Medieval Kingdom, Nuclear Survival, Space
+  Civilization, True Horror, Industrial Revolution, Cozy Adventure), each a
+  coherent creative brief — theme, gameplay loop, progression, exploration,
+  combat, visuals, atmosphere, mod categories, pack size, RAM, shaders,
+  multiplayer — composed with the interpreter's vocabulary so the seed
+  prompt really drives the builder (verified: every concept's prompt
+  round-trips through `interpret()` with real features). Clicking a card
+  opens an editor where the brief is editable before anything is built, and
+  BUILD seeds the AI Builder prompt.
+- **Surprise Me** (`concepts.surprise_me`): a deterministic generator that
+  composes a coherent concept from theme / gameplay-loop / progression /
+  exploration / combat pools (never a random mod list), sized to the
+  detected hardware (RAM → pack size; shaders only on ≥8 GB), with a
+  RE-ROLL button. Same seed → same concept (tested); 12 seeds → 12 distinct
+  briefs.
+- **Pack Health dashboard** (`engine/health.py`): explainable status + a
+  weighted score (stability · compatibility · performance · content · theme
+  cohesion · maintenance) computed only from real record data — test
+  result, unresolved conflicts, perf estimate vs this PC's RAM, mod
+  breadth, identity feature coverage, the Last Known Good snapshot match,
+  and mod-update data. Every metric carries a Why popup with its exact
+  reasons; statuses map to Excellent / Stable / Attention / Problems /
+  Broken with honest forcing rules (FAIL → broken, never-tested → capped at
+  Attention).
+- **Real update check** (`PyEngine.check_pack_updates`): bounded provider
+  query per selected mod (newest version vs installed version id), persisted
+  as `healthUpdates` on the record; the Maintenance score and flags reflect
+  it. Verified live: 10 mods checked, 0 errors, real results recorded, no
+  fake counts.
+- **UI**: Pack Detail → Overview now leads with the health card (status +
+  score, six metric bars with Why buttons, flags, CHECK MOD UPDATES, and
+  RESTORE LAST KNOWN GOOD when a broken/problem pack has one). Home gains
+  the Starter Experiences section + SURPRISE ME button.
+- **Tests**: `health_concepts_test.py` 143/143 (concept structure + real
+  interpret round-trip, surprise determinism + hardware sizing, health
+  scoring on real record shapes incl. LKG snapshot compare, service
+  endpoints over the in-process bridge, UI construction). Regression:
+  identity_ui 8/8, smoke PASS, in-process PASS, one-system PASS, engine
+  self-test 18/18 (real instant build + validated exports).
+
 ## 2026-08-12 — Master-spec foundation: Pack Identity, intents, snapshots, LKG, transactional AI edits
 
 - **Pack Identity + semantic mod intent** (`engine/identity.py`): every pack

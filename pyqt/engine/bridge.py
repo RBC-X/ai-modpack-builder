@@ -96,6 +96,12 @@ class PyEngine:
     def plan_ai_change(self, build_id: str, prompt: str) -> dict:
         return self._s.plan_ai_change(build_id, prompt)
 
+    def pack_health(self, build_id: str) -> dict:
+        return self._s.pack_health(build_id)
+
+    def check_pack_updates(self, build_id: str, limit: int = 40) -> dict:
+        return self._s.check_pack_updates(build_id, limit)
+
     def apply_ai_change(self, build_id: str, prompt: str) -> dict:
         return self._s.apply_ai_change(build_id, prompt)
 

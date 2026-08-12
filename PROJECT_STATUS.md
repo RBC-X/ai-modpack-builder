@@ -4,6 +4,27 @@ _Generated 2026-08-10T22:33:50.581Z from real artifacts — never hand-edited._
 
 ## Latest verified work (2026-08-12, real runs)
 
+- **Starter concepts + Surprise Me + Pack Health dashboard.** Home gains a
+  Starter Experiences section: six curated, editable concept templates
+  (`engine/concepts.py` — Medieval Kingdom, Nuclear Survival, Space
+  Civilization, True Horror, Industrial Revolution, Cozy Adventure), each a
+  coherent creative brief composed with the interpreter's vocabulary
+  (verified: every concept's prompt round-trips through `interpret()` with
+  real features), plus a deterministic **Surprise Me** generator that composes
+  a concept from theme/loop/progression/exploration/combat pools sized to the
+  detected hardware (same seed → same concept; 12 seeds → 12 distinct
+  briefs; low RAM → light + no shaders). Cards open an editable preview;
+  BUILD seeds the AI Builder prompt. Pack Detail → Overview now leads with a
+  **Pack Health** card (`engine/health.py`): status (Excellent / Stable /
+  Attention / Problems / Broken) + weighted, explainable score from real
+  record data — test result, unresolved conflicts, perf estimate vs this
+  PC's RAM, mod breadth, identity feature coverage, LKG snapshot match, and
+  mod-update data — with a Why popup per metric, flags, CHECK MOD UPDATES
+  (real bounded provider check persisted as `healthUpdates`; verified live
+  10/10 mods checked, 0 errors) and RESTORE LAST KNOWN GOOD when broken.
+  Verified: `health_concepts_test.py` 143/143, engine self-test 18/18 (real
+  build + validated exports), identity_ui, smoke, in-process and one-system
+  suites all PASS.
 - **Foundational layer for the master-spec expansion: Pack Identity, mod intent,
   snapshots, Last Known Good, AI change plans, transactional AI edits.**
   New `engine/identity.py` (deterministic identity + per-mod semantic intent
