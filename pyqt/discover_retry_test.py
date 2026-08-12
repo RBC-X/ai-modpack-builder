@@ -66,12 +66,16 @@ def drive(api, wait_secs: float = 8.0):
     view = DiscoverView(api)
     view._search.setText("")
     view._search_now()
+    saw_retry_notice = False
     t0 = time.time()
     while time.time() - t0 < wait_secs:
         app.processEvents()
+        if "retrying" in (view._status.text() or "").lower():
+            saw_retry_notice = True
         if view._hits:
             break
         time.sleep(0.05)
+    view._saw_retry_notice = saw_retry_notice
     return view
 
 
@@ -84,6 +88,8 @@ check("recovery used the retry path", api._calls >= 2 and api._calls <= RETRY_EM
       f"{api._calls} calls (bounded at {RETRY_EMPTY_ATTEMPTS})")
 check("recovered hit is the real one",
       view._hits[0].get("slug") == "recovered-mod", str(view._hits[0].get("slug")))
+check("status line announces the retry", view._saw_retry_notice,
+      repr(view._status.text()))
 
 # --- 2. Persistent empty: bounded retries must give up, not loop forever ---
 api = BlipAPI(blips=10 ** 6)

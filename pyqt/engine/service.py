@@ -35,6 +35,13 @@ from .instance import (create_instance_dir, install_mod_jars,
                        install_resource_packs, install_shader_packs,
                        write_pack_readme, write_game_file)
 from .tester import run_test_level
+
+# A provider can answer 200 with an empty result set during a momentary
+# catalog/network blip. Bounded retries with backoff recover those in the
+# build pipeline (AI Builder + Ask-AI feature search) without stalling a
+# genuinely empty search forever. Mirrors the Discover view's retry policy.
+RETRY_EMPTY_ATTEMPTS = 3
+RETRY_BACKOFF_MS = 500
 from .launcher import (launch_pack, stop_pack, play_state, is_running,
                        current_play, read_pid, any_running, running_pids,
                        collect_launch_evidence, _read_pid_raw, _error_stage)
@@ -884,19 +891,29 @@ class PyEngine:
             target = f.get("targetCount", 1)
             candidates = []
             for prov in available:
-                try:
-                    hits = prov.search({
-                        "query": fid, "projectType": "mod",
-                        "minecraftVersion": r["minecraftVersion"],
-                        "loaders": None if r["loader"] == "vanilla" else [r["loader"]],
-                        "limit": 15,
-                        "categories": f.get("categoryTags"),
-                    })
-                    for h in hits:
-                        h["_provider"] = prov.name
-                        candidates.append(h)
-                except Exception as e:
-                    logger.warn("search", f"{prov.name} search for '{fid}' failed: {e}")
+                for attempt in range(RETRY_EMPTY_ATTEMPTS):
+                    try:
+                        hits = prov.search({
+                            "query": fid, "projectType": "mod",
+                            "minecraftVersion": r["minecraftVersion"],
+                            "loaders": None if r["loader"] == "vanilla" else [r["loader"]],
+                            "limit": 15,
+                            "categories": f.get("categoryTags"),
+                        })
+                        if hits or attempt >= RETRY_EMPTY_ATTEMPTS - 1:
+                            break
+                        # A provider answering 200 with an empty result set is
+                        # usually a momentary catalog blip — give it a bounded
+                        # retry before deciding the feature has no candidates.
+                        logger.warn("search", f"{prov.name} search for '{fid}' returned empty; retrying ({attempt + 1}/{RETRY_EMPTY_ATTEMPTS})")
+                        time.sleep(RETRY_BACKOFF_MS * (attempt + 1) / 1000.0)
+                    except Exception as e:
+                        logger.warn("search", f"{prov.name} search for '{fid}' failed: {e}")
+                        hits = []
+                        break
+                for h in hits:
+                    h["_provider"] = prov.name
+                    candidates.append(h)
             logger.info("search", f"Feature '{fid}': {len(candidates)} candidates from providers")
             ranked = []
             for c in candidates:

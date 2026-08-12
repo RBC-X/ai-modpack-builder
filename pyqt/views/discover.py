@@ -48,6 +48,7 @@ class DiscoverView(QWidget):
     add_mod = pyqtSignal(str, str, str, object, object)  # build, provider, project, version, type
     import_pack = pyqtSignal(str, str)
     open_settings = pyqtSignal()
+    search_retry = pyqtSignal(int)  # attempt number (1-based) of a retry
 
     def __init__(self, api):
         super().__init__()
@@ -72,6 +73,10 @@ class DiscoverView(QWidget):
         self._drawer: QFrame | None = None
         self._target_id: str | None = None
         self._search_serial = 0
+        # A provider blip recovered by the bounded retry is surfaced in the
+        # status line (the search runs off-thread, so a queued signal carries
+        # the notice back to the main thread).
+        self.search_retry.connect(self._on_search_retry)
         self._drawer_serial = 0
         self._detail_serial = 0
         self._last_columns = 3
@@ -364,6 +369,7 @@ class DiscoverView(QWidget):
                 if result.get("hits") or result.get("error"):
                     return result
                 if attempt < RETRY_EMPTY_ATTEMPTS - 1:
+                    self.search_retry.emit(attempt + 1)
                     time.sleep(RETRY_BACKOFF_MS * (attempt + 1) / 1000.0)
             return result
 
@@ -392,6 +398,16 @@ class DiscoverView(QWidget):
         source = "both catalogs" if self._provider == "all" else self._provider.capitalize()
         self._status.setText(f"Searching {source} with the selected compatibility filters…")
         self._setup_btn.hide()
+
+    def _on_search_retry(self, attempt: int) -> None:
+        """A provider answered 200 with an empty result set; tell the user the
+        search is retrying rather than silently waiting out the backoff."""
+        source = "both catalogs" if self._provider == "all" else self._provider.capitalize()
+        self._status_icon.setPixmap(icon_pixmap("refresh", theme.WARNING, 15))
+        self._status.setText(
+            f"Searching {source} — no results yet, retrying (attempt {attempt + 1} of "
+            f"{RETRY_EMPTY_ATTEMPTS})…"
+        )
         clear_layout(self._grid)
         columns = self._column_count()
         for col in range(columns):

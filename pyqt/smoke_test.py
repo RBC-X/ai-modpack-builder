@@ -105,24 +105,15 @@ except Exception as e:  # noqa: BLE001
 
 try:
     win._set_nav("discover")
+    # The view itself retries a transient empty browse (bounded, with backoff
+    # and a visible status notice), so the test only needs to wait for hits;
+    # a persistent empty result still fails the job.
     time0 = time.time()
-    while time0 + 10 > time.time():
+    while time0 + 15 > time.time():
         app.processEvents()
         if win.discover._hits:
             break
         time.sleep(0.05)
-    # One retry, cache-bypassed: a transient provider/network blip can return
-    # an empty browse on a shared CI IP, but a persistent empty result (a real
-    # regression in search) must still fail the job.
-    if not win.discover._hits:
-        win.discover._cache.clear()
-        win.discover._search_now()
-        time0 = time.time()
-        while time0 + 10 > time.time():
-            app.processEvents()
-            if win.discover._hits:
-                break
-            time.sleep(0.05)
     check("discover search/browse", len(win.discover._hits) > 0, f"{len(win.discover._hits)} hits")
     check("discover defaults to both real catalogs", win.discover._provider == "all")
     check("discover results expose provider images",
