@@ -4,6 +4,22 @@ _Generated 2026-08-10T22:33:50.581Z from real artifacts — never hand-edited._
 
 ## Latest verified work (2026-08-12, real runs)
 
+- **Foundational layer for the master-spec expansion: Pack Identity, mod intent,
+  snapshots, Last Known Good, AI change plans, transactional AI edits.**
+  New `engine/identity.py` (deterministic identity + per-mod semantic intent
+  with importance/replaceability/locked), `engine/snapshots.py`
+  (content-addressed manifests, one-per-pack LKG with supersede),
+  `engine/plan.py` (non-mutating change plans with impact/confidence/risk),
+  and `PyEngine.apply_ai_change` (snapshot → candidate build → promote only
+  on PASS; rejected candidates leave the parent untouched, recorded in
+  `aiHistory`). UI: Pack Detail Settings gains an Identity & Recovery
+  section (theme, locked mods, LKG status, Restore LKG, snapshot restore)
+  and Ask AI now shows a plan preview with APPLY & TEST / MODIFY PLAN /
+  CANCEL. Verified: `identity_snapshots_test.py` 33/33 PASS, UI test 8/8
+  PASS, engine self-test 18/18 (real build + validated exports), smoke,
+  in-process and security-regression suites green. Gap matrix written
+  (`MASTER_SPEC_GAP_MATRIX.md`); docs added: PACK_IDENTITY.md, SNAPSHOTS.md,
+  AI_SYSTEM.md.
 - **1.0.8: periodic checks, rollback, and in-app release notes shipped via the live feed.**
   The launcher re-checks the feed every 2 h while open (own throttle stamp;
   honors the Settings toggle); Settings → Updates now shows a

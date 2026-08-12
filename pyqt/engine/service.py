@@ -45,6 +45,11 @@ from .hardware import detect_hardware, fit_xmx_mb, performance_estimate
 from .shaders import pick_shader_preset, choose_shader, rendering_mod_for
 from .resource_packs import pick_resource_pack, choose_resource_pack
 from .compat import CompatibilityDatabase
+from .identity import derive_identity, apply_intents
+from .snapshots import (create_snapshot, list_snapshots, load_snapshot,
+                        last_known_good as _lkg_snapshot, mark_last_known_good,
+                        restore_from_snapshot)
+from .plan import plan_change
 from .jarmeta import essential_libraries, norm_id
 from .jarname import invalid_module_reason, find_invalid_module_jar
 
@@ -233,11 +238,20 @@ class PyEngine:
             out.append(_summary_record(merged) if rec else s)
         return out
 
+    def _attach_identity(self, rec: dict) -> dict:
+        """Attach PackIdentity + per-mod intents to a record on read (no disk write)."""
+        rec = dict(rec)
+        req = rec.get("requirements") or {}
+        if not rec.get("identity"):
+            rec["identity"] = derive_identity(req, rec)
+        rec["selections"] = apply_intents(rec.get("selections") or [], rec.get("identity"))
+        return rec
+
     def build(self, build_id: str) -> dict:
         rec = self._read_record(build_id)
         if not rec:
             raise KeyError("build not found")
-        rec = dict(rec)
+        rec = self._attach_identity(rec)
         rec["running"] = is_running(build_id)
         st = play_state(build_id, str(self._build_dir(build_id)))
         if st:
@@ -482,6 +496,182 @@ class PyEngine:
         return {"ok": True}
 
     # ------------------------------------------------------------------
+    # Pack Identity / snapshots / Last Known Good / AI change plans
+    # ------------------------------------------------------------------
+    def identity(self, build_id: str) -> dict:
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        return self._attach_identity(rec).get("identity") or {}
+
+    def set_identity(self, build_id: str, patch: dict) -> dict:
+        """Update editable identity fields (core theme, locked mods, goals…)."""
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        cur = rec.get("identity") or derive_identity(rec.get("requirements") or {}, rec)
+        for k in ("coreTheme", "primaryGoals", "secondaryGoals", "requiredFeatures",
+                  "optionalFeatures", "forbiddenFeatures", "lockedMods", "style", "multiplayer"):
+            if k in patch:
+                cur[k] = patch[k]
+        if isinstance(patch.get("performanceTarget"), dict):
+            cur.setdefault("performanceTarget", {})
+            cur["performanceTarget"].update(patch["performanceTarget"])
+        rec["identity"] = cur
+        rec["selections"] = apply_intents(rec.get("selections") or [], cur)
+        rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._write_record(rec)
+        return {"ok": True, "identity": cur}
+
+    def snapshots(self, build_id: str) -> list:
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        return list_snapshots(self._build_dir(build_id))
+
+    def create_snapshot(self, build_id: str, label: str, kind: str = "manual") -> dict:
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        rec = self._attach_identity(rec)
+        snap = create_snapshot(self._build_dir(build_id), rec, label, kind)
+        rec.setdefault("aiHistory", []).append({
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "op": "snapshot", "label": label, "kind": kind,
+            "snapshotId": snap["snapshotId"],
+        })
+        rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._write_record(rec)
+        return snap
+
+    def restore_snapshot(self, build_id: str, snapshot_id: str, label: str = "") -> dict:
+        """Restore a snapshot into the pack (transactional, same promotion rules)."""
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        snap = load_snapshot(self._build_dir(build_id), snapshot_id)
+        if not snap:
+            raise KeyError("snapshot not found")
+        # Protect the current working state first.
+        self.create_snapshot(build_id, "Before restore: " + (snap.get("label") or snapshot_id))
+        cand = restore_from_snapshot(self._build_dir(build_id), rec, snap)
+        self._write_record(cand)
+        cand.setdefault("aiHistory", []).append({
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "op": "restore", "snapshotId": snapshot_id,
+            "label": snap.get("label") or "",
+        })
+        self._write_record(cand)
+        return {"ok": True, "buildId": build_id, "snapshotId": snapshot_id,
+                "label": snap.get("label") or label}
+
+    def last_known_good(self, build_id: str) -> dict | None:
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        lkg = _lkg_snapshot(self._build_dir(build_id))
+        if not lkg:
+            return None
+        return {"snapshotId": lkg["snapshotId"], "label": lkg.get("label"),
+                "createdAt": lkg.get("createdAt"), "modCount": len(lkg.get("selections") or []),
+                "minecraftVersion": (lkg.get("requirements") or {}).get("minecraftVersion"),
+                "loader": (lkg.get("requirements") or {}).get("loader")}
+
+    def restore_last_known_good(self, build_id: str) -> dict:
+        lkg = self.last_known_good(build_id)
+        if not lkg:
+            raise KeyError("no last known good snapshot")
+        return self.restore_snapshot(build_id, lkg["snapshotId"], "Last Known Good")
+
+    def plan_ai_change(self, build_id: str, prompt: str) -> dict:
+        """Non-mutating AI change plan for a conversational request."""
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        rec = self._attach_identity(rec)
+        return plan_change(rec, prompt, self.hardware())
+
+    def apply_ai_change(self, build_id: str, prompt: str) -> dict:
+        """Transactional AI edit: snapshot → candidate build → promote only on PASS.
+
+        The working pack is never mutated directly. A candidate child build
+        runs the requested change; when it validates, its result is promoted
+        into this pack's record. On failure the original stays untouched and
+        the failed attempt is recorded in aiHistory.
+        """
+        rec = self._read_record(build_id)
+        if not rec:
+            raise KeyError("build not found")
+        # Protect the current state before anything happens.
+        self.create_snapshot(build_id, "Before AI: " + (prompt or "")[:60], kind="before-ai-edit")
+        candidate_id = self.start_build({
+            "prompt": prompt, "parentBuildId": build_id, "candidateOf": build_id,
+            "name": (rec.get("name") or "Untitled") + " (AI candidate)",
+        })
+        return {"ok": True, "buildId": build_id, "candidateBuildId": candidate_id}
+
+    def _promote_candidate(self, parent_id: str, cand: dict) -> None:
+        """Merge a validated candidate build into its parent record.
+
+        Only selections/graph/test evidence and the identity are copied — the
+        parent keeps its own build dir, name, and history. Never called on a
+        failed candidate.
+        """
+        parent = self._read_record(parent_id)
+        if not parent:
+            return
+        req = cand.get("requirements") or {}
+        parent["requirements"] = req
+        parent["selections"] = apply_intents(cand.get("selections") or [],
+                                              cand.get("identity") or derive_identity(req, cand))
+        parent["identity"] = cand.get("identity") or derive_identity(req, cand)
+        parent["graph"] = cand.get("graph")
+        parent["testResult"] = cand.get("testResult")
+        parent["packStats"] = cand.get("packStats") or {}
+        parent["shaderChoice"] = cand.get("shaderChoice")
+        parent["resourcePackChoice"] = cand.get("resourcePackChoice")
+        parent["perfEstimate"] = cand.get("perfEstimate")
+        parent["repairs"] = cand.get("repairs") or []
+        parent.setdefault("aiHistory", []).append({
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "op": "promote", "fromBuildId": cand.get("buildId"),
+            "label": (cand.get("request") or "AI change")[:80],
+            "testStatus": (cand.get("testResult") or {}).get("status"),
+            "modCount": (cand.get("packStats") or {}).get("modCount"),
+        })
+        parent["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # Sync the validated instance (mods/shaderpacks/resourcepacks) from the
+        # candidate build dir into the parent so Play runs the new state.
+        try:
+            self._sync_candidate_instance(parent_id, cand)
+        except Exception:  # noqa: BLE001
+            pass
+        self._write_record(parent)
+        # A promoted pack that validated is the new Last Known Good.
+        try:
+            mark_last_known_good(self._build_dir(parent_id), self._attach_identity(parent))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sync_candidate_instance(self, parent_id: str, cand: dict) -> None:
+        """Copy the candidate build's installed mods/visuals into the parent."""
+        cand_inst = self._build_dir(cand["buildId"]) / "instance" / "minecraft"
+        par_inst = self._build_dir(parent_id) / "instance" / "minecraft"
+        for sub in ("mods", "shaderpacks", "resourcepacks"):
+            src = cand_inst / sub
+            dst = par_inst / sub
+            if not src.is_dir():
+                continue
+            mkdirp(dst)
+            for f_ in src.iterdir():
+                if f_.name in (".keep",) or not f_.is_file():
+                    continue
+                try:
+                    shutil.copyfile(f_, dst / f_.name)
+                except OSError:
+                    continue
+
+    # ------------------------------------------------------------------
     # build pipeline
     # ------------------------------------------------------------------
     def start_build(self, req: dict) -> str:
@@ -500,6 +690,11 @@ class PyEngine:
             "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
+        # Candidate builds (AI edits / transactional changes) know their parent
+        # so completion can promote a PASS or leave the parent untouched on FAIL.
+        if req.get("candidateOf"):
+            rec["candidateOf"] = req["candidateOf"]
+            rec["parentBuildId"] = req.get("parentBuildId") or req["candidateOf"]
         mkdirp(self._build_dir(build_id))
         self._write_record(rec)
         t = threading.Thread(target=self._run_build, args=(build_id, prompt, req), daemon=True)
@@ -523,6 +718,37 @@ class PyEngine:
         rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(rec)
         logger.log("ok", "report", f"Build finished: {rec['status']}", progress=100)
+
+        # ---- candidate lifecycle (transactional AI edits)
+        if rec.get("candidateOf"):
+            parent_id = rec["parentBuildId"] or rec["candidateOf"]
+            if rec.get("status") == "done" and (rec.get("testResult") or {}).get("status") == "PASS":
+                try:
+                    self._promote_candidate(parent_id, rec)
+                    logger.log("ok", "promote", f"Candidate validated — promoted into {parent_id}")
+                except Exception as e:  # noqa: BLE001
+                    logger.error("system", f"Candidate promotion failed: {e}")
+            else:
+                parent = self._read_record(parent_id)
+                if parent:
+                    parent.setdefault("aiHistory", []).append({
+                        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "op": "rejected", "fromBuildId": build_id,
+                        "label": (prompt or "AI change")[:80],
+                        "reason": (rec.get("error") or
+                                   (rec.get("testResult") or {}).get("status") or "failed"),
+                    })
+                    parent["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    self._write_record(parent)
+                    logger.log("warn", "promote",
+                               f"Candidate did not validate — original {parent_id} untouched")
+
+        # ---- Last Known Good: a pack that validated is restorable forever
+        if rec.get("status") == "done" and (rec.get("testResult") or {}).get("status") == "PASS":
+            try:
+                mark_last_known_good(self._build_dir(build_id), self._attach_identity(rec))
+            except Exception:  # noqa: BLE001
+                pass
 
     def _pipeline(self, build_id, rec, prompt, req, logger) -> dict:
         settings = self.settings_store.load()
@@ -1576,6 +1802,12 @@ class PyEngine:
             rec["status"] = "done" if test_result["status"] == "PASS" else "failed"
             rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             self._write_record(rec)
+            if test_result["status"] == "PASS":
+                try:
+                    mark_last_known_good(self._build_dir(build_id),
+                                         self._attach_identity(self._read_record(build_id) or rec))
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as e:
             logger.error("test", f"Retest failed: {e}")
 

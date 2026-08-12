@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-08-12 — Master-spec foundation: Pack Identity, intents, snapshots, LKG, transactional AI edits
+
+- **Pack Identity + semantic mod intent** (`engine/identity.py`): every pack
+  now carries a derived, persisted identity (theme, goals, required/optional/
+  forbidden features, locked mods, performance target, multiplayer) and every
+  selection carries an intent record (role, why-selected, importance,
+  replaceability, alternatives, costs, confidence, locked). Deterministic —
+  no LLM guesses.
+- **Snapshots + Last Known Good** (`engine/snapshots.py`): content-addressed
+  manifests (exact selections, hashes, config hashes — no binary copies),
+  one-per-pack LKG auto-marked after every validated test and superseded on
+  the next PASS. Restore is transactional (current state snapshotted first).
+- **AI change plans** (`engine/plan.py`): non-mutating plan for any
+  conversational request — verb, features added/removed, mods/deps/RAM
+  impact, confidence, risk, preserved identity. Ask AI now shows the plan
+  (APPLY & TEST / MODIFY PLAN / CANCEL) before building.
+- **Transactional AI edits**: `apply_ai_change` snapshots the pack, runs a
+  real candidate build, and promotes only on PASS (record + instance files);
+  a failed candidate leaves the pack untouched and records the rejection in
+  `aiHistory`. The old `chat()` fork behavior is preserved.
+- **UI**: Pack Detail → Settings gains an Identity & Recovery section
+  (theme, locked mods, LKG status, Restore Last Known Good, snapshot
+  restore list).
+- **Tests**: `identity_snapshots_test.py` (33 checks incl. promotion +
+  rejection paths), `identity_ui_test.py` (8 checks), engine self-test
+  18/18, smoke, in-process, security regression — all green. Real build +
+  validated exports rerun to confirm no pipeline regression.
+- **Docs**: MASTER_SPEC_GAP_MATRIX.md (honest per-section status),
+  PACK_IDENTITY.md, SNAPSHOTS.md, AI_SYSTEM.md.
+
 ## 2026-08-12 — 1.0.8: periodic update checks, rollback, release notes in-app
 
 - **Periodic background update check**: the launcher now re-checks the feed

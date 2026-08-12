@@ -71,6 +71,34 @@ class PyEngine:
         """AI chat edit: start a child build from the edited request."""
         return {"buildId": self._call(self._s.start_build, {"prompt": prompt, "parentBuildId": build_id or None})}
 
+    # -- pack identity / snapshots / LKG / AI change plans --------------
+    def identity(self, build_id: str) -> dict:
+        return self._s.identity(build_id)
+
+    def set_identity(self, build_id: str, patch: dict) -> dict:
+        return self._s.set_identity(build_id, patch)
+
+    def snapshots(self, build_id: str) -> list:
+        return self._s.snapshots(build_id)
+
+    def create_snapshot(self, build_id: str, label: str, kind: str = "manual") -> dict:
+        return self._s.create_snapshot(build_id, label, kind)
+
+    def restore_snapshot(self, build_id: str, snapshot_id: str, label: str = "") -> dict:
+        return self._s.restore_snapshot(build_id, snapshot_id, label)
+
+    def last_known_good(self, build_id: str) -> dict | None:
+        return self._s.last_known_good(build_id)
+
+    def restore_last_known_good(self, build_id: str) -> dict:
+        return self._s.restore_last_known_good(build_id)
+
+    def plan_ai_change(self, build_id: str, prompt: str) -> dict:
+        return self._s.plan_ai_change(build_id, prompt)
+
+    def apply_ai_change(self, build_id: str, prompt: str) -> dict:
+        return self._s.apply_ai_change(build_id, prompt)
+
     # -- launcher --------------------------------------------------------
     def play(self, build_id: str, username: Optional[str] = None,
              auth: Optional[dict] = None, auto_launch: bool = False) -> dict:

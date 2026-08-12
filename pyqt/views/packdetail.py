@@ -771,6 +771,53 @@ class PackDetailView(QWidget):
         cl.addWidget(self._relaunch_hint)
         cl.addWidget(label(c, "Recoveries are logged in the launch overlay and launch-state.json.", "muted"))
 
+        # ---- Pack Identity & Recovery (snapshots / Last Known Good)
+        sep3 = QFrame(c)
+        sep3.setFixedHeight(1)
+        sep3.setStyleSheet(f"background: {theme.BORDER};")
+        cl.addWidget(sep3)
+        cl.addWidget(label(c, "Pack Identity & Recovery", "h3"))
+        ident = r.get("identity") or {}
+        if ident.get("coreTheme"):
+            cl.addWidget(label(c, f"Theme: {ident.get('coreTheme')}", "sub"))
+        goals = ident.get("primaryGoals") or []
+        if goals:
+            cl.addWidget(label(c, "Primary goals: " + ", ".join(goals), "muted"))
+        locked = ident.get("lockedMods") or []
+        if locked:
+            cl.addWidget(label(c, "Locked mods: " + ", ".join(locked), "muted"))
+        snapshots = self.api.snapshots(self.build_id) if self.build_id else []
+        lkg = None
+        if self.build_id:
+            try:
+                lkg = self.api.last_known_good(self.build_id)
+            except Exception:  # noqa: BLE001
+                lkg = None
+        if lkg:
+            cl.addWidget(label(c, f"🟢 Last Known Good: {lkg.get('createdAt')} · {lkg.get('modCount')} mods", "mono green"))
+        elif snapshots:
+            cl.addWidget(label(c, "No validated Last Known Good yet — snapshots below still protect the pack.", "muted"))
+        else:
+            cl.addWidget(label(c, "Every successful test auto-creates a Last Known Good snapshot you can restore.", "muted"))
+        if self.build_id and lkg:
+            rb = button(c, "↺ RESTORE LAST KNOWN GOOD", "btn-dark", "refresh")
+            rb.clicked.connect(self._restore_lkg)
+            cl.addWidget(rb)
+        if snapshots:
+            srow = QHBoxLayout()
+            srow.setSpacing(8)
+            box = QComboBox(c)
+            for s in snapshots:
+                kind = {"last-known-good": "LKG", "before-ai-edit": "AI", "manual": "Manual",
+                        "superseded-lkg": "old LKG"}.get(s.get("kind"), s.get("kind") or "")
+                box.addItem(f"[{kind}] {s.get('label')} · {s.get('createdAt')}", s.get("snapshotId"))
+            srow.addWidget(box, 1)
+            rs = button(c, "RESTORE SNAPSHOT", "btn-dark", "refresh")
+            rs.clicked.connect(lambda: self._restore_snapshot(box.currentData()))
+            srow.addWidget(rs)
+            cl.addLayout(srow)
+            cl.addWidget(label(c, "Restoring takes a snapshot of the current state first — nothing is lost.", "muted"))
+
         sep2 = QFrame(c)
         sep2.setFixedHeight(1)
         sep2.setStyleSheet(f"background: {theme.BORDER};")
@@ -854,6 +901,71 @@ class PackDetailView(QWidget):
     def _save_ram(self) -> None:
         if self.build_id:
             self.set_ram.emit(self.build_id, self._ram_slider.value())
+
+    def _restore_lkg(self) -> None:
+        if not self.build_id:
+            return
+        lkg = None
+        try:
+            lkg = self.api.last_known_good(self.build_id)
+        except Exception:  # noqa: BLE001
+            pass
+        if not lkg:
+            return
+        d = QDialog(self)
+        d.setWindowTitle("Restore Last Known Good")
+        d.setStyleSheet(f"QDialog {{ background: {theme.CARD}; }}")
+        d.resize(460, 210)
+        lay = vbox(d, 12, margins=(20, 18, 20, 18))
+        lay.addWidget(label(d, "Restore Last Known Good?", "h3"))
+        lay.addWidget(label(d, f"This pack's last validated state ({lkg.get('createdAt')}, "
+                              f"{lkg.get('modCount')} mods on {lkg.get('minecraftVersion')} "
+                              f"{lkg.get('loader')}) will be restored.", "muted"))
+        lay.addWidget(label(d, "The current state is snapshotted first, so nothing is lost.", "muted"))
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = button(d, "Cancel", "btn-dark")
+        cancel.clicked.connect(d.reject)
+        go = button(d, "RESTORE", "btn-primary", "refresh", theme.BG)
+        go.clicked.connect(d.accept)
+        row.addWidget(cancel)
+        row.addWidget(go)
+        lay.addLayout(row)
+        if d.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        def fetch():
+            return self.api.restore_last_known_good(self.build_id)
+
+        def ok(res):
+            if self.build_id:
+                self.status_changed.emit(self.build_id)
+
+        def err(e):
+            self.toast_error(f"Restore failed: {e}")
+
+        run_async(fetch, ok, err)
+
+    def _restore_snapshot(self, snapshot_id: str) -> None:
+        if not self.build_id or not snapshot_id:
+            return
+
+        def fetch():
+            return self.api.restore_snapshot(self.build_id, snapshot_id)
+
+        def ok(res):
+            if self.build_id:
+                self.status_changed.emit(self.build_id)
+
+        def err(e):
+            self.toast_error(f"Restore failed: {e}")
+
+        run_async(fetch, ok, err)
+
+    def toast_error(self, msg: str) -> None:
+        # PackDetail has no toast; surface via status_changed path is complex,
+        # so use a modal-free approach: re-emit status to refresh and print.
+        print(f"[packdetail] {msg}", flush=True)
 
     def _save_auto_relaunch(self, enabled: bool) -> None:
         if self.build_id:

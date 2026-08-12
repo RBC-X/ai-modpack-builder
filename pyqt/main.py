@@ -484,6 +484,7 @@ class MainWindow(QMainWindow):
         self.packdetail.set_ram.connect(self.set_ram)
         self.packdetail.set_auto_relaunch.connect(self.set_auto_relaunch)
         self.packdetail.set_shader_preset.connect(self.set_shader_preset)
+        self.packdetail.status_changed.connect(lambda bid: self._reload_detail(bid))
 
         self.discover.add_mod.connect(self.add_mod)
         self.discover.import_pack.connect(self.import_pack)
@@ -1211,20 +1212,122 @@ class MainWindow(QMainWindow):
         run_async(fetch, ok, err)
 
     def ask_ai(self, build_id: str, prompt: str) -> None:
-        self.toast("Applying AI edits — building…")
+        """Ask-AI: show the non-mutating change plan first; only build on approval.
+
+        The plan tells the user what will change (mods added/removed, RAM,
+        risk, what is preserved) before anything is built. Approval runs the
+        transactional candidate — the working pack stays untouched until the
+        candidate validates and is promoted.
+        """
+        self.toast("Planning AI change…")
 
         def fetch():
-            return self.api.chat(prompt, build_id)
+            return self.api.plan_ai_change(build_id, prompt)
+
+        def ok(plan):
+            if not plan.get("changes") and not plan.get("interpretation", {}).get("addFeatures"):
+                self.toast("I couldn't map that request to pack changes — try rephrasing.", 7000)
+                return
+            self._confirm_ai_plan(build_id, prompt, plan)
+
+        def err(e):
+            self.toast(f"[plan] {e}")
+
+        run_async(fetch, ok, err)
+
+    def _confirm_ai_plan(self, build_id: str, prompt: str, plan: dict) -> None:
+        """Plan preview dialog with APPLY & TEST / MODIFY PLAN / CANCEL."""
+        d = QDialog(self)
+        d.setWindowTitle("Suggested AI changes")
+        d.setStyleSheet(f"QDialog {{ background: {theme.CARD}; }}")
+        d.resize(600, 480)
+        lay = vbox(d, 12, margins=(22, 18, 22, 18))
+        lay.addWidget(label(d, "Suggested changes", "h3"))
+        interp = plan.get("interpretation") or {}
+        ch = plan.get("changes") or {}
+        imp = plan.get("impact") or {}
+        pres = plan.get("preserved") or {}
+        lines = []
+        if interp.get("addLabels"):
+            lines.append("Add: " + ", ".join(interp["addLabels"]))
+        if interp.get("removeLabels"):
+            lines.append("Remove: " + ", ".join(interp["removeLabels"]))
+        if interp.get("shaderChange"):
+            lines.append("Change shader preset")
+        if interp.get("ramGB"):
+            lines.append(f"Target RAM: {interp['ramGB']} GB")
+        body = "\n".join(lines) if lines else "(no feature-level changes recognized)"
+        lay.addWidget(label(d, f"You said: “{prompt}”", "sub"))
+        bx = QPlainTextEdit(d)
+        bx.setReadOnly(True)
+        bx.setPlainText(body)
+        bx.setMinimumHeight(110)
+        lay.addWidget(bx, 1)
+        meta = (f"Mods added: {ch.get('modsAdded', 0)}  ·  removed: {ch.get('modsRemoved', 0)}  ·  "
+                f"deps est.: {ch.get('dependenciesEstimated', 0)}  ·  RAM → {imp.get('ramTo')} GB  ·  "
+                f"confidence {imp.get('confidence')}%  ·  risk {imp.get('risk')}")
+        lay.addWidget(label(d, meta, "mono"))
+        if pres.get("coreTheme"):
+            lay.addWidget(label(d, f"Preserves: {pres.get('coreTheme')} — locked mods stay.", "muted"))
+        lay.addWidget(label(d, "The pack is snapshotted first; the current state stays intact until the change validates.", "muted"))
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = button(d, "Cancel", "btn-dark")
+        cancel.clicked.connect(d.reject)
+        modify = button(d, "MODIFY PLAN", "btn-dark", "settings")
+        modify.clicked.connect(lambda: (d.accept(), self._open_ai_editor(build_id, prompt)))
+        go = button(d, "APPLY & TEST", "btn-primary", "sparkles", theme.BG)
+        go.clicked.connect(lambda: (d.accept(), self._apply_ai_change(build_id, prompt)))
+        row.addWidget(cancel)
+        row.addWidget(modify)
+        row.addWidget(go)
+        lay.addLayout(row)
+        d.exec()
+
+    def _open_ai_editor(self, build_id: str, prompt: str) -> None:
+        """MODIFY PLAN: open the plain edit dialog for the same pack."""
+        d = QDialog(self)
+        d.setWindowTitle("Refine the AI request")
+        d.setStyleSheet(f"QDialog {{ background: {theme.CARD}; }}")
+        d.resize(520, 240)
+        lay = vbox(d, 12, margins=(20, 18, 20, 18))
+        lay.addWidget(label(d, "Refine the AI request", "h3"))
+        box = QPlainTextEdit(d)
+        box.setPlainText(prompt)
+        box.setMinimumHeight(90)
+        lay.addWidget(box)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = button(d, "Cancel", "btn-dark")
+        cancel.clicked.connect(d.reject)
+        go = button(d, "RE-PLAN", "btn-primary", "sparkles", theme.BG)
+        def apply():
+            p2 = box.toPlainText().strip()
+            if p2:
+                self.ask_ai(build_id, p2)
+            d.accept()
+        go.clicked.connect(apply)
+        row.addWidget(cancel)
+        row.addWidget(go)
+        lay.addLayout(row)
+        d.exec()
+
+    def _apply_ai_change(self, build_id: str, prompt: str) -> None:
+        """Transactional apply: snapshot → candidate build → promote on PASS."""
+        self.toast("Applying AI change (candidate)…")
+
+        def fetch():
+            return self.api.apply_ai_change(build_id, prompt)
 
         def ok(res):
-            bid = res.get("buildId") or ""
-            self.toast(f"AI edit build started: {bid}")
+            bid = res.get("candidateBuildId") or ""
+            self.toast(f"Candidate build started: {bid} — the pack is snapshotted.")
             self.refresh_builds()
             if bid:
                 QTimer.singleShot(800, lambda: self._open_detail(bid))
 
         def err(e):
-            self.toast(f"[chat] {e}")
+            self.toast(f"[apply] {e}")
 
         run_async(fetch, ok, err)
 
