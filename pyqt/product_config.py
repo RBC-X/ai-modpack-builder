@@ -19,4 +19,10 @@ MICROSOFT_CLIENT_ID = os.environ.get("MINECRAFT_CLIENT_ID", EMBEDDED_MICROSOFT_C
 # pipeline (pyqt/build_installer.py) reads this for the Inno Setup
 # MyAppVersion define, and the self-updater compares it against the update
 # feed. Bump it for every release.
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
+
+# Default self-update feed for installed builds. Fresh installs auto-point
+# at this HTTPS feed (Settings → Updates prefills it; the startup check and
+# --check-update use it too), so end users never configure anything.
+# AMB_UPDATE_URL still wins as an environment override.
+DEFAULT_UPDATE_FEED_URL = "https://github.com/RBC-X/ai-modpack-builder/releases/latest/download/update.json"

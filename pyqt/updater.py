@@ -29,9 +29,10 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from product_config import APP_VERSION
+    from product_config import APP_VERSION, DEFAULT_UPDATE_FEED_URL
 except Exception:  # noqa: BLE001  (module moved / not on path)
     APP_VERSION = "1.0.0"
+    DEFAULT_UPDATE_FEED_URL = ""
 
 DEFAULT_MAX_INSTALLER_MB = 600
 CHECK_STAMP = "last-update-check"  # filename inside data_dir for throttle
@@ -71,8 +72,10 @@ def version_tuple(v: str):
 
 
 def update_url() -> str:
-    """Feed URL from env or nothing (the app setting is merged by callers)."""
-    return os.environ.get("AMB_UPDATE_URL", "").strip()
+    """Feed URL: AMB_UPDATE_URL override, else the embedded default for
+    installed builds (the app setting `updateUrl` is merged by callers).
+    Fresh installs therefore auto-point at the shipped feed URL."""
+    return os.environ.get("AMB_UPDATE_URL", "").strip() or DEFAULT_UPDATE_FEED_URL.strip()
 
 
 def fetch_feed(url: str, timeout: int = 20) -> dict:
@@ -102,7 +105,8 @@ def check(url: str, timeout: int = 20) -> dict:
         feed = fetch_feed(url, timeout)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"could not reach update feed: {e}",
-                "current": APP_VERSION, "latest": None, "available": False}
+                "current": APP_VERSION, "latest": None, "available": False,
+                "feedUrl": str(url or "").strip()}
     latest = str(feed.get("version", "")).strip()
     available = version_tuple(latest) > version_tuple(APP_VERSION)
     return {
@@ -111,6 +115,7 @@ def check(url: str, timeout: int = 20) -> dict:
         "latest": latest,
         "available": available,
         "notes": str(feed.get("notes") or ""),
+        "feedUrl": str(url or "").strip(),
         "installerUrl": str(feed.get("installerUrl", "")).strip(),
         "installerSha256": str(feed.get("installerSha256") or "").strip().lower(),
     }

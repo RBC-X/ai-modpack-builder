@@ -4,6 +4,17 @@ _Generated 2026-08-10T22:33:50.581Z from real artifacts — never hand-edited._
 
 ## Latest verified work (2026-08-12, real runs)
 
+- **1.0.7: default update feed embedded — fresh installs need zero config.**
+  `DEFAULT_UPDATE_FEED_URL` (public GitHub feed) is baked into the build and
+  `updater.update_url()` uses it when no env/setting exists; `check()` now
+  records the resolved `feedUrl`. Fresh-user proof:
+  `pyqt/fresh_user_feed_test.ps1` silent-installed 1.0.7 into a clean
+  prefix with a fresh LOCALAPPDATA (no state.json), ran `--check-update`
+  with no URL and no env override → default resolved to the public GitHub
+  feed and reported `ok: true, current: 1.0.7, available: false` (rc 0).
+  The installed 1.0.6 launcher then updated in place to 1.0.7 over the live
+  feed (SHA `2e183155…cbb7a` verified) and now also reports up to date via
+  the default with zero flags.
 - **1.0.6 shipped in place via the LIVE GitHub feed**: the installed 1.0.5
   app ran the full loop over `releases/latest/download/update.json` —
   `available: true` → downloaded 29,233,848 bytes → SHA-256 `01d750b3…76`

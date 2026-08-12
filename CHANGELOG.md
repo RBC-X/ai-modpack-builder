@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-08-12 — 1.0.7: default update feed embedded + fresh-user update path proven
+
+- **Fresh installs now auto-point at the public GitHub feed.**
+  `DEFAULT_UPDATE_FEED_URL` is embedded in the build
+  (`pyqt/product_config.py`) and `updater.update_url()` resolves it
+  whenever no env override (`AMB_UPDATE_URL`) or app setting exists — so a
+  brand-new install needs **zero configuration** to get auto-updates.
+  Settings → Updates prefills it; the startup check and `--check-update`
+  use it too.
+- **`check()` now records the resolved `feedUrl` in its report**, so every
+  update-check verdict shows exactly which feed was consulted (also on the
+  error path).
+- **Fresh-user proof (clean prefix, zero config):** silent-installed 1.0.7
+  into a scratch dir with a fresh LOCALAPPDATA (no `state.json`), ran
+  `--check-update` with **no URL and no env override** → the embedded
+  default resolved to
+  `https://github.com/RBC-X/ai-modpack-builder/releases/latest/download/update.json`
+  and reported `ok: true, current: 1.0.7, available: false` (rc 0).
+  `pyqt/fresh_user_feed_test.ps1` is the repeatable script.
+- **The installed 1.0.6 launcher updated in place to 1.0.7 over the live
+  GitHub feed** (29,240,312 bytes downloaded, SHA `2e183155…cbb7a`
+  verified, `/DIR`-pinned silent install) and now also reports
+  `ok: true, current: 1.0.7, available: false` via the default feed.
+
 ## 2026-08-12 — 1.0.6 shipped to the installed launcher via the LIVE GitHub feed (verified)
 
 - **Jump-to-page + total-page estimate** ships in this release: the Discover
