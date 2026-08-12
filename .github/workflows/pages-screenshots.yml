@@ -3,10 +3,13 @@ name: Pages + screenshots
 on:
   push:
     branches: [main]
+  pull_request:
 
 concurrency:
-  group: pages-screenshots-main
-  cancel-in-progress: false
+  # Serialize main runs (the bot's own screenshot commit must not race the
+  # run that created it) but cancel stale runs when a PR gains a new commit.
+  group: pages-screenshots-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
@@ -15,7 +18,8 @@ permissions:
 jobs:
   refresh:
     # The bot's own screenshot commit must not re-trigger this job forever.
-    if: ${{ github.event.head_commit.author.username != 'github-actions[bot]' }}
+    # (head_commit is absent on pull_request events, so short-circuit there.)
+    if: ${{ github.event_name != 'push' || github.event.head_commit.author.username != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +60,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python pyqt/screenshot.py
 
+      # Write steps only on main pushes: a PR must not commit bot gallery
+      # updates to its branch or trigger a Pages rebuild.
       - name: Refresh the committed gallery
+        if: ${{ github.event_name == 'push' }}
         env:
           AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
         run: |
@@ -79,4 +86,5 @@ jobs:
           fi
 
       - name: Rebuild the Pages site
+        if: ${{ github.event_name == 'push' }}
         run: gh api repos/${{ github.repository }}/pages/builds -X POST >/dev/null 2>&1 || echo "Pages rebuild API unavailable; branch deploy rebuilds on the next push anyway"
