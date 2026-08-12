@@ -1,0 +1,67 @@
+name: Pages + screenshots
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: pages-screenshots-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  refresh:
+    # The bot's own screenshot commit must not re-trigger this job forever.
+    if: ${{ github.event.head_commit.author.username != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Qt offscreen system libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 fonts-dejavu-core
+
+      - name: Install Python dependencies
+        run: pip install -r pyqt/requirements.txt
+
+      - name: Seed a real build (live providers, instant validation)
+        env:
+          AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
+        run: python pyqt/seed_ci_build.py
+
+      - name: Regenerate screenshots (offscreen render, real engine data)
+        env:
+          AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
+          QT_QPA_PLATFORM: offscreen
+        run: python pyqt/screenshot.py
+
+      - name: Refresh the committed gallery
+        env:
+          AMB_WORKSPACE: ${{ runner.temp }}/amb-workspace
+        run: |
+          set -e
+          for f in 01-home 02-library 03-pack-overview 07-discover 08-ai-builder 12-launch-overlay; do
+            cp "pyqt/screenshots/$f.png" "screenshots/$f.png"
+          done
+          git add screenshots
+          if git diff --cached --quiet; then
+            echo "gallery unchanged"
+          else
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit -m "chore: regenerate launcher screenshots on main"
+            git push
+          fi
+
+      - name: Rebuild the Pages site
+        run: gh api repos/${{ github.repository }}/pages/builds -X POST >/dev/null 2>&1 || echo "Pages rebuild API unavailable; branch deploy rebuilds on the next push anyway"
