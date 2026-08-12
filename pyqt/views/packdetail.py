@@ -100,7 +100,8 @@ class PackDetailView(QWidget):
         # Tabs
         tabs_frame = QFrame(body)
         tabs_frame.setFixedHeight(42)
-        tabs_frame.setStyleSheet(f"border: none; border-bottom: 1px solid {theme.BORDER};")
+        tabs_frame.setProperty("cls", "tabs-bar")
+        theme.polish(tabs_frame)
         tabs_row = hbox(tabs_frame, 8, margins=(0, 0, 0, 8))
         self._tab_btns: dict[str, object] = {}
         for tid, tlabel in [("overview", "Overview"), ("content", "Content"),
@@ -889,7 +890,8 @@ class PackDetailView(QWidget):
 
         sep0 = QFrame(c)
         sep0.setFixedHeight(1)
-        sep0.setStyleSheet(f"background: {theme.BORDER};")
+        sep0.setProperty("cls", "sep")
+        theme.polish(sep0)
         cl.addWidget(sep0)
         cl.addWidget(label(c, "Runtime Resilience", "h3"))
         ar = bool((r.get("settings") or {}).get("autoRelaunch", False))
@@ -913,7 +915,8 @@ class PackDetailView(QWidget):
         # ---- Pack Identity & Recovery (snapshots / Last Known Good)
         sep3 = QFrame(c)
         sep3.setFixedHeight(1)
-        sep3.setStyleSheet(f"background: {theme.BORDER};")
+        sep3.setProperty("cls", "sep")
+        theme.polish(sep3)
         cl.addWidget(sep3)
         cl.addWidget(label(c, "Pack Identity & Recovery", "h3"))
         ident = r.get("identity") or {}

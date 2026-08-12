@@ -1623,12 +1623,17 @@ class PyEngine:
         cap = 50 if prov.name == "curseforge" else 100
         return max(1, min(int(page_size or 48), cap))
 
+    # sort keys understood by every source; "name" falls back to a client-side
+    # title sort because Modrinth has no server-side name index.
+    SORT_KEYS = ("downloads", "updated", "name")
+
     def search(self, q: str = "", provider: str = "modrinth", mc: str = None,
                loader: str = None, type: str = "mod", offset: int = 0,
-               page_size: int = 48) -> dict:
+               page_size: int = 48, sort: str = "downloads") -> dict:
         providers = self._cached_providers()
         mc_f = mc if mc and mc != "auto" else None
         loaders = [loader] if loader and loader not in ("all", "auto") else None
+        sort = sort if sort in self.SORT_KEYS else "downloads"
 
         # Worlds exist only on CurseForge (class 17) — route there exclusively.
         if type == "world":
@@ -1644,8 +1649,9 @@ class PyEngine:
             try:
                 meta = cf.search_meta({"query": q, "projectType": "world",
                                        "minecraftVersion": mc_f, "loaders": loaders,
-                                       "limit": ps, "offset": offset}) or {}
-                hits = meta.get("hits") or []
+                                       "limit": ps, "offset": offset,
+                                       "sort": sort}) or {}
+                hits = self._apply_sort(meta.get("hits") or [], sort)
                 total = int(meta.get("total") or 0)
                 return {"provider": "curseforge", "hits": hits, "browse": not bool(q),
                         "page_size": ps,
@@ -1674,7 +1680,8 @@ class PyEngine:
                     futs = {pool.submit(p.search_meta, {"query": q, "projectType": type,
                                                         "minecraftVersion": mc_f, "loaders": loaders,
                                                         "limit": sizes[p.name],
-                                                        "offset": page * sizes[p.name]}): p for p in wanted}
+                                                        "offset": page * sizes[p.name],
+                                                        "sort": sort}): p for p in wanted}
                     for fut in concurrent.futures.as_completed(futs):
                         prov = futs[fut]
                         try:
@@ -1715,7 +1722,7 @@ class PyEngine:
                 else:
                     sources.append({"provider": prov.name, "ok": False, "count": 0,
                                     "available": True, "error": str(val)})
-            merged.sort(key=lambda h: h.get("downloads") or 0, reverse=True)
+            merged = self._apply_sort(merged, sort)
             if not wanted:
                 return {"provider": "all", "hits": [], "browse": not bool(q),
                         "page_size": page_size, "more": False, "total": 0,
@@ -1735,8 +1742,9 @@ class PyEngine:
                 "query": q, "projectType": type,
                 "minecraftVersion": mc_f, "loaders": loaders,
                 "limit": ps, "offset": offset,
+                "sort": sort,
             }) or {}
-            hits = meta.get("hits") or []
+            hits = self._apply_sort(meta.get("hits") or [], sort)
             total = int(meta.get("total") or 0)
             return {"provider": prov.name, "hits": hits, "browse": not bool(q),
                     "page_size": ps,
@@ -1747,6 +1755,21 @@ class PyEngine:
         except Exception as e:
             return {"provider": prov.name, "hits": [], "page_size": ps, "more": False,
                     "total": 0, "error": str(e)}
+
+    @staticmethod
+    def _apply_sort(hits: list, sort: str) -> list:
+        """Client-side sort. Server-side sort keys are passed to each provider;
+        this re-orders the merged page for consistency and provides the name
+        fallback (Modrinth has no server-side title index)."""
+        items = list(hits)
+        if sort == "name":
+            items.sort(key=lambda h: str(h.get("title") or "").lower())
+        elif sort == "updated":
+            items.sort(key=lambda h: h.get("dateModified") or h.get("dateCreated") or "",
+                       reverse=True)
+        else:  # downloads (default)
+            items.sort(key=lambda h: h.get("downloads") or 0, reverse=True)
+        return items
 
     def project_details(self, provider: str, project_id: str, mc: str = None,
                         loader: str = None) -> dict:

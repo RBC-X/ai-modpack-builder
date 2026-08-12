@@ -65,6 +65,8 @@ class DiscoverView(QWidget):
         self._base_page_size = 48
         self._page_size = 48  # effective size from the last result (merged = sum)
         self._remembered = self._load_remembered()
+        self._sorts = self._load_sorts()
+        self._sort = self._sorts.get(self._type, "downloads")
         self._page = int(self._remembered.get(self._ctx_key(), 0) or 0)
         self._more = False
         self._total = 0
@@ -159,6 +161,18 @@ class DiscoverView(QWidget):
             "so merged pages combine each source's own limit.")
         self._page_size_box.currentIndexChanged.connect(self._on_page_size)
         filter_row.addWidget(self._page_size_box)
+        # Sort picker: downloads / recently updated / name (per content type).
+        self._sort_box = QComboBox(controls)
+        self._sort_box.addItems(["Most downloaded", "Recently updated", "Name (A–Z)"])
+        self._sort_box.setCurrentText({"downloads": "Most downloaded",
+                                       "updated": "Recently updated",
+                                       "name": "Name (A–Z)"}.get(self._sort, "Most downloaded"))
+        self._sort_box.setMinimumWidth(160)
+        self._sort_box.setToolTip(
+            "Sort order for this content type. Modrinth name-sorts client-side "
+            "(no server-side title index); CurseForge uses its native sort fields.")
+        self._sort_box.currentIndexChanged.connect(self._on_sort)
+        filter_row.addWidget(self._sort_box)
         controls_lay.addLayout(filter_row)
         self.root.addWidget(controls)
 
@@ -245,6 +259,20 @@ class DiscoverView(QWidget):
             self._search_now()
 
     @staticmethod
+    def _load_sorts() -> dict:
+        """Last chosen sort per content type (persisted in the UI state file)."""
+        raw = _load_state().get("discoverSorts") or {}
+        return {str(k): str(v) for k, v in raw.items()}
+
+    def _remember_sort(self) -> None:
+        if self._sorts.get(self._type) == self._sort:
+            return
+        self._sorts[self._type] = self._sort
+        st = _load_state()
+        st["discoverSorts"] = dict(self._sorts)
+        _save_state(st)
+
+    @staticmethod
     def _load_remembered() -> dict:
         """Load remembered pages, migrating legacy type-only keys ("mod")
         to the full context form ("mod|all|all|auto|48")."""
@@ -258,13 +286,13 @@ class DiscoverView(QWidget):
         return remembered
 
     def _ctx_key(self, content_type: str = None, provider: str = None,
-                 loader: str = None, version: str = None) -> str:
+                 loader: str = None, version: str = None, sort: str = None) -> str:
         """The exact browsing context (content type + provider + loader + MC
-        version + page size) that owns a remembered page."""
+        version + page size + sort) that owns a remembered page."""
         return "|".join([
             content_type or self._type, provider or self._provider,
             loader or self._loader, version or self._version,
-            str(self._base_page_size),
+            str(self._base_page_size), sort or self._sort,
         ])
 
     def _remember_page(self) -> None:
@@ -278,6 +306,22 @@ class DiscoverView(QWidget):
         st["discoverPages"] = dict(self._remembered)
         _save_state(st)
 
+    def _on_sort(self) -> None:
+        """Change the sort for the current content type; remember it per type
+        and re-run the search from page 0 (a different order re-ranks the
+        whole catalog, so the old page position is meaningless)."""
+        text = self._sort_box.currentText()
+        new_sort = {"Most downloaded": "downloads",
+                    "Recently updated": "updated",
+                    "Name (A–Z)": "name"}.get(text, "downloads")
+        if new_sort == self._sort:
+            return
+        self._sort = new_sort
+        self._remember_sort()
+        self._page = 0
+        self._remember_page()
+        self._search_now()
+
     def _set_provider(self, provider: str) -> None:
         self._remember_page()
         self._provider = provider
@@ -289,7 +333,12 @@ class DiscoverView(QWidget):
 
     def _set_type(self, content_type: str) -> None:
         self._remember_page()
+        self._remember_sort()
         self._type = content_type
+        self._sort = self._sorts.get(content_type, "downloads")
+        self._sort_box.setCurrentText({"downloads": "Most downloaded",
+                                       "updated": "Recently updated",
+                                       "name": "Name (A–Z)"}.get(self._sort, "Most downloaded"))
         self._page = int(self._remembered.get(self._ctx_key(), 0) or 0)
         for type_id, control in self._type_btns.items():
             control.setProperty("active", "true" if type_id == content_type else "false")
@@ -343,7 +392,7 @@ class DiscoverView(QWidget):
     # ------------------------------------------------------------------
     def _search_key(self) -> tuple:
         return (self._search.text().strip().lower(), self._provider, self._type,
-                self._version, self._loader, self._page, self._base_page_size)
+                self._version, self._loader, self._page, self._base_page_size, self._sort)
 
     def _search_now(self) -> None:
         query = self._search.text().strip()
@@ -365,7 +414,7 @@ class DiscoverView(QWidget):
                 result = self.api.search(q=query, provider=self._provider, mc=self._version,
                                          loader=self._loader, type=self._type,
                                          offset=self._page * self._page_size,
-                                         page_size=self._base_page_size)
+                                         page_size=self._base_page_size, sort=self._sort)
                 if result.get("hits") or result.get("error"):
                     return result
                 if attempt < RETRY_EMPTY_ATTEMPTS - 1:

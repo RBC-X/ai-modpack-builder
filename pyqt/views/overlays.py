@@ -689,7 +689,8 @@ class ImportModal(QDialog):
 
         sep = QFrame(self)
         sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background: {theme.BORDER};")
+        sep.setProperty("cls", "sep")
+        theme.polish(sep)
         lay.addWidget(sep)
 
         # ---- Provider import ----

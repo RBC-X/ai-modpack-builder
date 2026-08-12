@@ -59,9 +59,12 @@ url = captured[-1]
 check("browse mode sorts by downloads too",
       "sortField=6" in url and "sortOrder=desc" in url, url)
 
-p.search_meta({"query": "create", "limit": 10, "projectType": "mod", "sort": "3"})
+p.search_meta({"query": "create", "limit": 10, "projectType": "mod", "sort": "updated"})
 url = captured[-1]
-check("caller-passed sort wins", "sortField=3" in url, url)
+check("updated maps to sortField=3", "sortField=3" in url, url)
+p.search_meta({"query": "create", "limit": 10, "projectType": "mod", "sort": "name"})
+url = captured[-1]
+check("name maps to sortField=4", "sortField=4" in url, url)
 
 # And the mapped hit carries the real download count.
 r = p.search_meta({"query": "Just Enough Items", "limit": 10, "projectType": "mod"})

@@ -133,8 +133,8 @@ class PyEngine:
     # -- mod browser -----------------------------------------------------
     def search(self, q: str = "", provider: str = "modrinth", mc: Optional[str] = None,
                loader: Optional[str] = None, type: str = "mod", offset: int = 0,
-               page_size: int = 48) -> dict:
-        return self._s.search(q, provider, mc, loader, type, offset, page_size)
+               page_size: int = 48, sort: str = "downloads") -> dict:
+        return self._s.search(q, provider, mc, loader, type, offset, page_size, sort)
 
     def project_details(self, provider: str, project_id: str, mc: Optional[str] = None,
                         loader: Optional[str] = None) -> dict:

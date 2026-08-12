@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         self.launch_overlay = LaunchOverlay(self)
         self.import_overlay = ImportOverlay(self)
         self.crash_drawer = CrashDrawer(self, api)
+        self._palette: QDialog | None = None
 
         # central layout: sidebar | right column
         central = QWidget()
@@ -271,10 +272,16 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _build_sidebar(self) -> QFrame:
+        from views.misc import _load_state
         sb = QFrame(self)
         sb.setProperty("cls", "sidebar")
         theme.polish(sb)
-        sb.setFixedWidth(224)
+        self._sidebar_compact = bool(_load_state().get("sidebarCompact", False))
+        sb.setFixedWidth(64 if self._sidebar_compact else 224)
+        self._sb = sb
+        self._sb_labels: list[QLabel] = []   # text labels to hide when compact
+        self._sb_text_cols: list = []        # text columns (logo subtitle, account)
+        self._sb_badges: list[QLabel] = []   # AI / download badges
         v = vbox(sb, 0)
         v.setContentsMargins(0, 0, 0, 0)
 
@@ -282,7 +289,7 @@ class MainWindow(QMainWindow):
         logo = QFrame(sb)
         logo.setObjectName("logoHeader")
         logo.setFixedHeight(58)
-        logo.setStyleSheet(f"QFrame#logoHeader {{ background: {theme.PANEL}; border: none; border-bottom: 1px solid {theme.BORDER}; }}")
+        theme.polish(logo)
         lr = hbox(logo, 10, margins=(20, 0, 16, 0))
         mark = QFrame(logo)
         mark.setProperty("cls", "logo-badge")
@@ -298,9 +305,12 @@ class MainWindow(QMainWindow):
         col.setSpacing(0)
         t = label(logo, "AI MINECRAFT", "logo-title")
         col.addWidget(t)
+        self._sb_labels.append(t)
         sub = label(logo, "Launcher Engine", "logo-sub")
         col.addWidget(sub)
+        self._sb_labels.append(sub)
         lr.addLayout(col)
+        self._sb_text_cols.append(col)
         lr.addStretch(1)
         v.addWidget(logo)
 
@@ -325,31 +335,51 @@ class MainWindow(QMainWindow):
             bl.addWidget(ic)
             nav_label = label(b, nlabel, "nav-label")
             bl.addWidget(nav_label)
+            self._sb_labels.append(nav_label)
             bl.addStretch(1)
             if nid == "ai-builder":
                 badge = label(b, "AI", "nav-badge-ai")
                 badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 bl.addWidget(badge)
+                self._sb_badges.append(badge)
             if nid == "downloads":
                 self._dl_badge = label(b, "", "nav-badge")
                 self._dl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._dl_badge.setVisible(False)
                 bl.addWidget(self._dl_badge)
+                self._sb_badges.append(self._dl_badge)
             b.mousePressEvent = lambda e, n=nid: self._set_nav(n)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setToolTip(nlabel)
             nv.addWidget(b)
             self.nav_btns[nid] = (b, indicator, ic, nav_label)
         v.addWidget(navwrap)
         v.addStretch(1)
+
+        # collapse toggle
+        toggle_row = QFrame(sb)
+        toggle_row.setProperty("cls", "sidebar-divider")
+        theme.polish(toggle_row)
+        tr = hbox(toggle_row, 0, margins=(12, 10, 12, 10))
+        self._sb_toggle = button(toggle_row, "", "iconbtn",
+                                "chevrons-left" if not self._sidebar_compact else "chevrons-right",
+                                theme.TEXT2)
+        self._sb_toggle.setToolTip("Collapse sidebar" if not self._sidebar_compact else "Expand sidebar")
+        self._sb_toggle.clicked.connect(self._toggle_sidebar)
+        tr.addWidget(self._sb_toggle)
+        tr.addStretch(1)
+        v.addWidget(toggle_row)
 
         # account block
         account_wrap = QFrame(sb)
         account_wrap.setProperty("cls", "sidebar-divider")
         theme.polish(account_wrap)
         aw = vbox(account_wrap, 0, margins=(10, 10, 10, 10))
+        self._account_wrap = account_wrap
         acc = QFrame(account_wrap)
         acc.setProperty("cls", "account-card")
         theme.polish(acc)
+        self._acc_card = acc
         ar = hbox(acc, 10, margins=(8, 8, 6, 6))
         self._acc_icon = QLabel(acc)
         self._acc_icon.setFixedSize(32, 32)
@@ -358,16 +388,68 @@ class MainWindow(QMainWindow):
         col2.setSpacing(0)
         self._acc_name = label(acc, "N/A", "h3")
         col2.addWidget(self._acc_name)
+        self._sb_labels.append(self._acc_name)
         self._acc_status = label(acc, "Status: N/A", "muted")
         col2.addWidget(self._acc_status)
+        self._sb_labels.append(self._acc_status)
         ar.addLayout(col2, 1)
+        self._sb_text_cols.append(col2)
         ab = button(acc, "", "iconbtn", "usercheck", theme.GREEN)
         ab.clicked.connect(self.account_modal.show)
+        self._acc_btn = ab
         ar.addWidget(ab)
         aw.addWidget(acc)
         v.addWidget(account_wrap)
         self._refresh_account_block()
+        self._apply_sidebar_compact(animate=False)
         return sb
+
+    def _toggle_sidebar(self) -> None:
+        from views.misc import _load_state, _save_state
+        self._sidebar_compact = not self._sidebar_compact
+        st = _load_state()
+        st["sidebarCompact"] = self._sidebar_compact
+        _save_state(st)
+        self._apply_sidebar_compact(animate=True)
+
+    def _apply_sidebar_compact(self, animate: bool = False) -> None:
+        compact = self._sidebar_compact
+        target = 64 if compact else 224
+        self._sb.setFixedWidth(target)
+        self._sb_toggle.setIcon(icon("chevrons-right" if compact else "chevrons-left",
+                                     theme.TEXT2))
+        self._sb_toggle.setToolTip("Expand sidebar" if compact else "Collapse sidebar")
+        for label_w in self._sb_labels:
+            label_w.setVisible(not compact)
+        for col in self._sb_text_cols:
+            col.setEnabled(not compact)
+        for badge in self._sb_badges:
+            badge.setVisible(not compact)
+        # Account block: compact shows only the centered avatar (the card
+        # chrome + usercheck button only fit at 224px).
+        self._acc_card.setVisible(not compact)
+        if hasattr(self, "_acc_btn"):
+            self._acc_btn.setVisible(not compact)
+        self._apply_sidebar_margins()
+
+    def _apply_sidebar_margins(self) -> None:
+        """Center nav icons when compact; keep left-aligned when expanded."""
+        compact = self._sidebar_compact
+        # Nav rows are built once; compact mode centers the icon in the rail.
+        for nid, (b, indicator, ic, nav_label) in self.nav_btns.items():
+            lay = b.layout()
+            if lay is None:
+                continue
+            if compact:
+                lay.setContentsMargins(0, 0, 0, 0)
+                lay.setSpacing(0)
+                for i in range(lay.count()):
+                    item = lay.itemAt(i)
+                    if item.widget() is ic:
+                        lay.setAlignment(ic, Qt.AlignmentFlag.AlignHCenter)
+            else:
+                lay.setContentsMargins(14, 0, 14, 0)
+                lay.setSpacing(12)
 
     def _refresh_account_block(self) -> None:
         from views.misc import _load_state
@@ -493,6 +575,12 @@ class MainWindow(QMainWindow):
         self.settings.settings_changed.connect(lambda _patch: self.discover.invalidate_cache())
         self.settings.settings_changed.connect(lambda _patch: self.aibuilder._load_hardware())
         self.settings.manage_account_requested.connect(self.account_modal.show)
+        self.settings.theme_changed.connect(self._apply_theme)
+        self.settings.sidebar_changed.connect(self._apply_sidebar_state)
+
+        from PyQt6.QtGui import QKeySequence, QShortcut
+        self._palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._palette_shortcut.activated.connect(self._open_palette)
 
         self.aibuilder.build_completed.connect(lambda _bid: self.refresh_builds())
         self.aibuilder.play_requested.connect(self.play)
@@ -772,6 +860,106 @@ class MainWindow(QMainWindow):
         """A starter concept / Surprise Me brief seeds the AI Builder prompt."""
         self.aibuilder.seed_prompt(prompt)
         self._set_nav("ai-builder")
+
+    # ------------------------------------------------------------------
+    def _open_palette(self) -> None:
+        """Ctrl+K command palette: navigate anywhere, run quick actions."""
+        from PyQt6.QtWidgets import QDialog, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
+        if self._palette is not None and self._palette.isVisible():
+            self._palette.raise_()
+            return
+        d = QDialog(self)
+        d.setWindowTitle("Command palette")
+        d.setModal(False)
+        d.resize(560, 420)
+        d.setStyleSheet(f"QDialog {{ background: {theme.CARD}; }}")
+        lay = QVBoxLayout(d)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+        search = QLineEdit(d)
+        search.setPlaceholderText("Jump to a page or run an action…  (↑↓ to move, Enter to run, Esc to close)")
+        search.setMinimumHeight(38)
+        search.addAction(icon("search", theme.MUTED, 16), QLineEdit.ActionPosition.LeadingPosition)
+        lay.addWidget(search)
+        lst = QListWidget(d)
+        lst.setFrameShape(QFrame.Shape.NoFrame)
+        lst.setStyleSheet("QListWidget { background: transparent; font-size: 13px; }"
+                          "QListWidget::item { padding: 8px 10px; border-radius: 6px; }"
+                          "QListWidget::item:selected { background: rgba(57,184,106,0.18); color: #FFFFFF; }")
+        lay.addWidget(lst, 1)
+
+        # Actions: navigation + a few real quick actions.
+        actions = [("navigation", nlabel, lambda n=nid: (d.accept(), self._set_nav(n)))
+                   for nid, nlabel, _icon in NAV]
+        actions.append(("action", "Check for updates now", lambda: (d.accept(), self._manual_update_check())))
+        actions.append(("action", "Re-detect hardware", lambda: (d.accept(), self._redetect_hardware())))
+        actions.append(("action", "Import a modpack…", lambda: (d.accept(), self.import_modal.show())))
+        actions.append(("action", "New pack…", lambda: (d.accept(), self.new_pack_dialog.show())))
+        sel = self.home.selected()
+        if sel:
+            bid = sel.get("buildId")
+            actions.append(("action", f"Play {sel.get('name') or 'selected pack'}",
+                            lambda b=bid: (d.accept(), self.play(b))))
+
+        def populate(filter_text: str = "") -> None:
+            lst.clear()
+            q = filter_text.strip().lower()
+            for kind, text, fn in actions:
+                if q and q not in text.lower():
+                    continue
+                item = QListWidgetItem(f"  {text}")
+                item.setData(256, fn)
+                if kind == "navigation":
+                    item.setIcon(icon("arrowright", theme.TEXT2, 14))
+                lst.addItem(item)
+            if lst.count():
+                lst.setCurrentRow(0)
+
+        populate()
+        search.textChanged.connect(populate)
+        lst.itemActivated.connect(lambda item: (d.accept(), item.data(256)()))
+        lst.itemClicked.connect(lambda item: (d.accept(), item.data(256)()))
+        lst.keyPressEvent = lambda e: None  # arrows handled by the list natively
+
+        def on_enter() -> None:
+            item = lst.currentItem()
+            if item is not None:
+                fn = item.data(256)
+                d.accept()
+                fn()
+        search.returnPressed.connect(on_enter)
+        self._palette = d
+        d.finished.connect(lambda _code: setattr(self, "_palette", None))
+        d.show()
+        search.setFocus()
+
+    def _manual_update_check(self) -> None:
+        self._set_nav("settings")
+        self.settings._set_sub("updates")
+        QTimer.singleShot(200, self.settings._do_update_check)
+
+    def _redetect_hardware(self) -> None:
+        self._set_nav("settings")
+        self.settings._set_sub("minecraft")
+        QTimer.singleShot(200, self.settings._redetect)
+
+    # ------------------------------------------------------------------
+    def _apply_theme(self, pref: str) -> None:
+        """Re-theme the whole window after an Appearance change."""
+        theme.set_mode(pref)
+        self.setStyleSheet(theme.QSS)
+        # Re-polish every widget so dynamic-property styles update in place.
+        for w in self.findChildren(QWidget):
+            theme.polish(w)
+        theme.polish(self)
+        self._set_nav(self.active_nav)   # re-color the nav rail
+        self._refresh_account_block()
+        self._apply_sidebar_margins()
+
+    def _apply_sidebar_state(self, compact: bool) -> None:
+        """Apply the sidebar preference from Settings (keep the toggle in sync)."""
+        self._sidebar_compact = bool(compact)
+        self._apply_sidebar_compact(animate=True)
 
     # ------------------------------------------------------------------
     def _set_nav(self, nav: str) -> None:
@@ -1419,6 +1607,14 @@ def main() -> int:
     from engine.core import resource_path
     app.setWindowIcon(QIcon(str(resource_path("app.ico"))))
     theme.setup_fonts(app)
+    # Apply the saved Appearance preference (dark / light / system) before any
+    # widget is built so the whole window renders in the right palette from
+    # the first frame.
+    try:
+        from views.misc import _load_state
+        theme.set_mode(str(_load_state().get("theme", "dark")))
+    except Exception:  # noqa: BLE001 — never block startup on a theme read
+        theme.set_mode("dark")
     app.aboutToQuit.connect(icon_cache.shutdown)
     # One system: the Python engine runs in-process. No Node server, no
     # localhost — the desktop app IS the engine.

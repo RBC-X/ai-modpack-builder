@@ -143,8 +143,10 @@ class CurseForgeProvider:
         # so ranking each source the same way keeps the per-provider view and
         # the merged view consistent — and the canonical mod (e.g. JEI) is not
         # buried under fuzzy matches (CurseForge's default relevance sort is
-        # noisy). A caller that wants another order can pass opts["sort"].
-        qp["sortField"] = str(opts.get("sort", "6"))
+        # noisy). opts["sort"] maps the shared vocabulary: downloads (6),
+        # updated (3), name (4); unknown keys default to downloads.
+        sort_field = {"downloads": "6", "updated": "3", "name": "4"}
+        qp["sortField"] = str(opts.get("sort") and sort_field.get(opts["sort"], "6") or "6")
         qp["sortOrder"] = opts.get("sortOrder", "desc")
         if opts.get("minecraftVersion"):
             qp["gameVersion"] = opts["minecraftVersion"]

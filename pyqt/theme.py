@@ -1,30 +1,128 @@
 """Design tokens + QSS for the AI Minecraft Launcher (PyQt6).
 
-Port of the Tailwind palette in the reference design:
-  bg #111315 · panel #151719 · card #191C1F · hover #202428/#262B30
-  accent green #39B86A · text #F3F5F6 / #A7ADB4 / #737A82
+Two palettes (dark = flagship, light = soft neutrals) behind one token
+surface, so views read `theme.CARD` etc. and get the current mode's value.
+Switching modes rebuilds QSS and re-polishes the app (§16-17 of the
+frontend mandate). System mode follows the Windows AppsUseLightTheme flag.
+
 Dynamic-property selectors (QWidget[cls=...]) drive per-widget styling.
 """
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import QWidget, QApplication
 
 # --------------------------------------------------------------------------
-# Tokens
+# Palettes
 # --------------------------------------------------------------------------
-BG        = "#111315"
-PANEL     = "#151719"
-CARD      = "#191C1F"
-HOVER     = "#202428"
-HOVER2    = "#262B30"
-BORDER    = "rgba(255,255,255,0.07)"
-BORDER2   = "#343A40"
+DARK = {
+    "BG":       "#111315",
+    "PANEL":    "#151719",
+    "CARD":     "#191C1F",
+    "HOVER":    "#202428",
+    "HOVER2":   "#262B30",
+    "BORDER":   "rgba(255,255,255,0.07)",
+    "BORDER2":  "#343A40",
+    "TEXT":     "#F3F5F6",
+    "TEXT2":    "#A7ADB4",
+    "MUTED":    "#737A82",
+    # derived surfaces that are palette-specific
+    "SCROLL":        "#2A2F35",
+    "SCROLL_HOVER":  "#3B424A",
+    "ROWLINE":       "#202428",
+    "FRAME":         "#121517",
+    "SKEL_A":        "#191D20",
+    "SKEL_B":        "#202529",
+    "CONSOLE":       "#D8DDE2",
+    "BTN_DISABLED_BG":   "#244C34",
+    "BTN_DISABLED_TEXT": "#7F9186",
+    "BTN_DARK_DISABLED": "#1B1F22",
+    "ART_GRAD_A":   "#1D2522",
+    "ART_GRAD_B":   "#191C1F",
+    "ART_GRAD_C":   "#151719",
+    "HERO_GRAD_A":  "#17251E",
+    "HERO_GRAD_B":  "#1A1E1B",
+    "HERO_GRAD_C":  "#191C1F",
+    "SEARCH_GRAD_A": "#181C1E",
+    "SEARCH_GRAD_B": "#171A1C",
+    "SEARCH_GRAD_C": "#151918",
+    "DRAWER":       "#151819",
+}
 
-TEXT      = "#F3F5F6"
-TEXT2     = "#A7ADB4"
-MUTED     = "#737A82"
+LIGHT = {
+    "BG":       "#F4F5F7",
+    "PANEL":    "#FFFFFF",
+    "CARD":     "#FFFFFF",
+    "HOVER":    "#EAECEF",
+    "HOVER2":   "#DFE2E6",
+    "BORDER":   "rgba(20,28,40,0.10)",
+    "BORDER2":  "#C7CDD6",
+    "TEXT":     "#1A1F26",
+    "TEXT2":    "#4B5563",
+    "MUTED":    "#6B7280",
+    # derived surfaces
+    "SCROLL":        "#C6CCD4",
+    "SCROLL_HOVER":  "#AAB2BC",
+    "ROWLINE":       "#E6E9EE",
+    "FRAME":         "#EDEFF3",
+    "SKEL_A":        "#E9ECF0",
+    "SKEL_B":        "#F2F4F7",
+    "CONSOLE":       "#1F2733",
+    "BTN_DISABLED_BG":   "#C8E8D4",
+    "BTN_DISABLED_TEXT": "#5F7A6B",
+    "BTN_DARK_DISABLED": "#EDEFF2",
+    "ART_GRAD_A":   "#DDE3DC",
+    "ART_GRAD_B":   "#F1F3F1",
+    "ART_GRAD_C":   "#FFFFFF",
+    "HERO_GRAD_A":  "#DFF2E4",
+    "HERO_GRAD_B":  "#F0F3EF",
+    "HERO_GRAD_C":  "#FFFFFF",
+    "SEARCH_GRAD_A": "#FFFFFF",
+    "SEARCH_GRAD_B": "#FCFCFD",
+    "SEARCH_GRAD_C": "#F7F8FA",
+    "DRAWER":       "#FFFFFF",
+}
 
+PALETTES = {"dark": DARK, "light": LIGHT}
+MODE = "dark"   # current mode; "system" resolves at apply time
+
+
+def resolve_mode(pref: str) -> str:
+    """Map a user preference to an actual palette: 'system' reads Windows."""
+    if pref != "system":
+        return pref if pref in PALETTES else "dark"
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            val, _ = winreg.QueryValueEx(k, "AppsUseLightTheme")
+            return "light" if int(val or 0) else "dark"
+    except Exception:  # noqa: BLE001 — non-Windows / missing key: dark
+        return "dark"
+
+
+def _current() -> dict:
+    return PALETTES[MODE]
+
+
+# Module-level token surface — views read these and get the active palette.
+BG       = _current()["BG"]
+PANEL    = _current()["PANEL"]
+CARD     = _current()["CARD"]
+HOVER    = _current()["HOVER"]
+HOVER2   = _current()["HOVER2"]
+BORDER   = _current()["BORDER"]
+BORDER2  = _current()["BORDER2"]
+
+TEXT     = _current()["TEXT"]
+TEXT2    = _current()["TEXT2"]
+MUTED    = _current()["MUTED"]
+
+# Accent + semantic colors are shared across both palettes (scarcity rule:
+# one green accent, used strategically).
 GREEN       = "#39B86A"
 GREEN_HOVER = "#43C878"
 GREEN_DARK  = "#2F9D5A"
@@ -34,6 +132,28 @@ DANGER    = "#E45C5C"
 WARNING   = "#E5A84B"
 MODRINTH  = "#47C97A"
 CURSEFORGE= "#F16436"
+
+# Derived surfaces (palette-specific) exposed as tokens.
+SCROLL        = _current()["SCROLL"]
+SCROLL_HOVER  = _current()["SCROLL_HOVER"]
+ROWLINE       = _current()["ROWLINE"]
+FRAME         = _current()["FRAME"]
+SKEL_A        = _current()["SKEL_A"]
+SKEL_B        = _current()["SKEL_B"]
+CONSOLE       = _current()["CONSOLE"]
+BTN_DISABLED_BG   = _current()["BTN_DISABLED_BG"]
+BTN_DISABLED_TEXT = _current()["BTN_DISABLED_TEXT"]
+BTN_DARK_DISABLED = _current()["BTN_DARK_DISABLED"]
+ART_GRAD_A    = _current()["ART_GRAD_A"]
+ART_GRAD_B    = _current()["ART_GRAD_B"]
+ART_GRAD_C    = _current()["ART_GRAD_C"]
+HERO_GRAD_A   = _current()["HERO_GRAD_A"]
+HERO_GRAD_B   = _current()["HERO_GRAD_B"]
+HERO_GRAD_C   = _current()["HERO_GRAD_C"]
+SEARCH_GRAD_A = _current()["SEARCH_GRAD_A"]
+SEARCH_GRAD_B = _current()["SEARCH_GRAD_B"]
+SEARCH_GRAD_C = _current()["SEARCH_GRAD_C"]
+DRAWER        = _current()["DRAWER"]
 
 MONO = "JetBrains Mono"
 SANS = "Inter"
@@ -93,7 +213,28 @@ def setup_fonts(app: QApplication) -> None:
 # --------------------------------------------------------------------------
 # QSS
 # --------------------------------------------------------------------------
-QSS = f"""
+QSS = ""
+
+
+def _qss() -> str:
+    """Build the stylesheet from the CURRENT palette values. Called once at
+    import and again by set_mode()."""
+    p = PALETTES[MODE]
+    # Local aliases so the f-string stays readable.
+    BG, PANEL, CARD, HOVER, HOVER2 = p["BG"], p["PANEL"], p["CARD"], p["HOVER"], p["HOVER2"]
+    BORDER, BORDER2 = p["BORDER"], p["BORDER2"]
+    TEXT, TEXT2, MUTED = p["TEXT"], p["TEXT2"], p["MUTED"]
+    SCROLL, SCROLL_HOVER = p["SCROLL"], p["SCROLL_HOVER"]
+    ROWLINE, FRAME = p["ROWLINE"], p["FRAME"]
+    SKEL_A, SKEL_B = p["SKEL_A"], p["SKEL_B"]
+    CONSOLE = p["CONSOLE"]
+    BTN_DISABLED_BG, BTN_DISABLED_TEXT = p["BTN_DISABLED_BG"], p["BTN_DISABLED_TEXT"]
+    BTN_DARK_DISABLED = p["BTN_DARK_DISABLED"]
+    ART_GRAD_A, ART_GRAD_B, ART_GRAD_C = p["ART_GRAD_A"], p["ART_GRAD_B"], p["ART_GRAD_C"]
+    HERO_GRAD_A, HERO_GRAD_B, HERO_GRAD_C = p["HERO_GRAD_A"], p["HERO_GRAD_B"], p["HERO_GRAD_C"]
+    SEARCH_GRAD_A, SEARCH_GRAD_B, SEARCH_GRAD_C = p["SEARCH_GRAD_A"], p["SEARCH_GRAD_B"], p["SEARCH_GRAD_C"]
+    DRAWER = p["DRAWER"]
+    return f"""
 * {{
     outline: none;
 }}
@@ -116,11 +257,11 @@ QWidget[mono="true"] {{
 /* Scrollbars (webkit-style 6px) */
 QScrollArea {{ border: none; background: {BG}; }}
 QScrollBar:vertical {{ background: {PANEL}; width: 6px; margin: 0; }}
-QScrollBar::handle:vertical {{ background: #2A2F35; border-radius: 3px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: #3B424A; }}
+QScrollBar::handle:vertical {{ background: {SCROLL}; border-radius: 3px; min-height: 30px; }}
+QScrollBar::handle:vertical:hover {{ background: {SCROLL_HOVER}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QScrollBar:horizontal {{ background: {PANEL}; height: 6px; margin: 0; }}
-QScrollBar::handle:horizontal {{ background: #2A2F35; border-radius: 3px; min-width: 30px; }}
+QScrollBar::handle:horizontal {{ background: {SCROLL}; border-radius: 3px; min-width: 30px; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 /* Cards / panels */
@@ -147,7 +288,7 @@ QFrame[cls="panel"] {{
 }}
 QFrame[cls="artwork"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #1D2522, stop:0.52 #191C1F, stop:1 #151719);
+        stop:0 {ART_GRAD_A}, stop:0.52 {ART_GRAD_B}, stop:1 {ART_GRAD_C});
     border: none;
     border-bottom: 1px solid {BORDER};
     border-top-left-radius: 11px;
@@ -160,48 +301,48 @@ QFrame[cls="hero"] {{
 }}
 QFrame[cls="hero-running"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #17251E, stop:0.6 #1A1E1B, stop:1 #191C1F);
+        stop:0 {HERO_GRAD_A}, stop:0.6 {HERO_GRAD_B}, stop:1 {HERO_GRAD_C});
     border: 1px solid rgba(57,184,106,0.45);
     border-radius: {R_2XL}px;
 }}
 QFrame[cls="search-panel"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #181C1E, stop:0.58 #171A1C, stop:1 #151918);
-    border: 1px solid rgba(255,255,255,0.09);
+        stop:0 {SEARCH_GRAD_A}, stop:0.58 {SEARCH_GRAD_B}, stop:1 {SEARCH_GRAD_C});
+    border: 1px solid {BORDER};
     border-radius: {R_XL}px;
 }}
 QFrame[cls="status-banner"] {{
-    background: rgba(32,36,40,0.56);
+    background: {HOVER2 if MODE == "dark" else "rgba(255,255,255,0.72)"};
     border: 1px solid {BORDER};
     border-radius: {R_LG}px;
 }}
 QFrame[cls="image-frame"] {{
-    background: #121517;
-    border: 1px solid rgba(255,255,255,0.09);
+    background: {FRAME};
+    border: 1px solid {BORDER};
     border-radius: {R_LG}px;
 }}
 QFrame[cls="gallery-frame"] {{
-    background: #121517;
-    border: 1px solid rgba(255,255,255,0.09);
+    background: {FRAME};
+    border: 1px solid {BORDER};
     border-radius: {R_LG}px;
 }}
 QFrame[cls="skeleton"] {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #191D20, stop:0.52 #202529, stop:1 #191D20);
+        stop:0 {SKEL_A}, stop:0.52 {SKEL_B}, stop:1 {SKEL_A});
     border: 1px solid {BORDER};
     border-radius: {R_XL}px;
 }}
 QFrame[cls="empty-state"] {{
-    background: rgba(25,28,31,0.72);
-    border: 1px dashed rgba(255,255,255,0.14);
+    background: {CARD};
+    border: 1px dashed {BORDER2};
     border-radius: {R_XL}px;
 }}
 QFrame[cls="drawer"] {{
-    background: #151819;
+    background: {DRAWER};
     border: none;
-    border-left: 1px solid #343A40;
+    border-left: 1px solid {BORDER2};
 }}
-QWidget[drawerPage="true"] {{ background: #151819; }}
+QWidget[drawerPage="true"] {{ background: {DRAWER}; }}
 QFrame[cls="card-hover"][provider="modrinth"]:hover {{
     border: 1px solid rgba(71,201,122,0.52);
 }}
@@ -232,6 +373,16 @@ QFrame[cls="sidebar-divider"] {{
     background: {PANEL};
     border-top: 1px solid {BORDER};
 }}
+QFrame[cls="tabs-bar"] {{
+    border: none;
+    border-bottom: 1px solid {BORDER};
+}}
+QFrame[cls="sep"] {{ background: {BORDER}; border: none; }}
+QFrame#logoHeader {{
+    background: {PANEL};
+    border: none;
+    border-bottom: 1px solid {BORDER};
+}}
 QPushButton[cls="nav"] {{
     background: transparent;
     color: {TEXT2};
@@ -241,7 +392,7 @@ QPushButton[cls="nav"] {{
     border-radius: {R_MD}px;
     font-weight: 500;
 }}
-QPushButton[cls="nav"]:hover {{ background: rgba(25,28,31,0.6); color: {TEXT}; }}
+QPushButton[cls="nav"]:hover {{ background: {CARD if MODE == "dark" else "rgba(0,0,0,0.05)"}; color: {TEXT}; }}
 QPushButton[cls="nav"][active="true"] {{
     background: {CARD};
     color: {TEXT};
@@ -290,8 +441,8 @@ QPushButton[cls="btn-primary"] {{
 QPushButton[cls="btn-primary"]:hover {{ background: {GREEN_HOVER}; }}
 QPushButton[cls="btn-primary"]:pressed {{ background: {GREEN_DARK}; }}
 QPushButton[cls="btn-primary"]:disabled {{
-    background: #244C34;
-    color: #7F9186;
+    background: {BTN_DISABLED_BG};
+    color: {BTN_DISABLED_TEXT};
     border: 1px solid rgba(57,184,106,0.15);
 }}
 
@@ -304,7 +455,7 @@ QPushButton[cls="btn-dark"] {{
     font-weight: 600;
 }}
 QPushButton[cls="btn-dark"]:hover {{ background: {HOVER2}; }}
-QPushButton[cls="btn-dark"]:disabled {{ color: {MUTED}; background: #1B1F22; }}
+QPushButton[cls="btn-dark"]:disabled {{ color: {MUTED}; background: {BTN_DARK_DISABLED}; }}
 
 QPushButton[cls="btn-microsoft"] {{
     background: #FFFFFF;
@@ -338,7 +489,7 @@ QPushButton[cls="iconbtn"] {{
 }}
 QPushButton[cls="iconbtn"]:hover {{ background: {HOVER2}; color: {TEXT}; }}
 QPushButton[cls="window-dot"] {{
-    background: rgba(255,255,255,0.10);
+    background: {HOVER2};
     border: none;
     border-radius: {R_SM}px;
     min-width: 12px;
@@ -347,7 +498,7 @@ QPushButton[cls="window-dot"] {{
     max-height: 12px;
     padding: 0;
 }}
-QPushButton[cls="window-dot"]:hover {{ background: rgba(255,255,255,0.24); }}
+QPushButton[cls="window-dot"]:hover {{ background: {SCROLL_HOVER}; }}
 
 QPushButton[cls="ghost"] {{
     background: transparent;
@@ -373,7 +524,7 @@ QPushButton:focus {{
 
 /* Compact controls in the 50px reference top bar */
 QPushButton[cls="top-compact"] {{
-    background: rgba(32,36,40,0.58);
+    background: {HOVER};
     color: {TEXT};
     border: 1px solid {BORDER};
     border-radius: {R_MD}px;
@@ -389,7 +540,7 @@ QPushButton[cls="top-compact"][active="true"] {{
     border: 1px solid rgba(57,184,106,0.42);
 }}
 QFrame[cls="top-compact-frame"] {{
-    background: rgba(32,36,40,0.58);
+    background: {HOVER};
     border: 1px solid {BORDER};
     border-radius: {R_MD}px;
 }}
@@ -426,7 +577,7 @@ QPushButton[cls="pill"][active="true"] {{
     font-weight: 700;
 }}
 QPushButton[cls="source-pill"] {{
-    background: #202428;
+    background: {HOVER};
     color: {TEXT2};
     border: 1px solid {BORDER};
     border-radius: {R_MD}px;
@@ -465,7 +616,7 @@ QPushButton[cls="provider-pill"][provider="curseforge"] {{
     border: 1px solid rgba(241,100,54,0.36);
 }}
 QPushButton[cls="tag-pill"] {{
-    background: rgba(255,255,255,0.035);
+    background: {HOVER if MODE == "dark" else "rgba(0,0,0,0.035)"};
     color: {TEXT2};
     border: 1px solid {BORDER};
     border-radius: {R_SM}px;
@@ -585,7 +736,7 @@ QPlainTextEdit[cls="console"] {{
     border-radius: {R_MD}px;
     font-family: "{MONO}";
     font-size: 11px;
-    color: #D8DDE2;
+    color: {CONSOLE};
     padding: 10px;
 }}
 
@@ -593,9 +744,9 @@ QPlainTextEdit[cls="console"] {{
 QFrame[cls="row"] {{
     background: transparent;
     border: none;
-    border-bottom: 1px solid #202428;
+    border-bottom: 1px solid {ROWLINE};
 }}
-QFrame[cls="row"]:hover {{ background: rgba(32,36,40,0.5); }}
+QFrame[cls="row"]:hover {{ background: {HOVER}; }}
 
 /* Tooltips */
 QToolTip {{
@@ -605,7 +756,49 @@ QToolTip {{
     border-radius: {R_SM}px;
     padding: 4px 8px;
 }}
+QMenu {{
+    background: {HOVER2};
+    color: {TEXT};
+    border: 1px solid {BORDER2};
+    border-radius: {R_MD}px;
+    padding: 4px;
+}}
+QMenu::item {{ padding: 6px 18px; border-radius: {R_SM}px; }}
+QMenu::item:selected {{ background: {GREEN_DARK}; color: {TEXT}; }}
+QDialog {{ background: {CARD}; }}
 """
+
+
+def set_mode(pref: str) -> None:
+    """Switch the active palette. `pref` is 'dark' | 'light' | 'system';
+    'system' resolves to the Windows flag. Rebuilds every token + QSS so a
+    single call fully re-themes the app."""
+    global MODE, QSS
+    global BG, PANEL, CARD, HOVER, HOVER2, BORDER, BORDER2
+    global TEXT, TEXT2, MUTED
+    global SCROLL, SCROLL_HOVER, ROWLINE, FRAME, SKEL_A, SKEL_B, CONSOLE
+    global BTN_DISABLED_BG, BTN_DISABLED_TEXT, BTN_DARK_DISABLED
+    global ART_GRAD_A, ART_GRAD_B, ART_GRAD_C, HERO_GRAD_A, HERO_GRAD_B, HERO_GRAD_C
+    global SEARCH_GRAD_A, SEARCH_GRAD_B, SEARCH_GRAD_C, DRAWER
+    MODE = resolve_mode(pref)
+    p = PALETTES[MODE]
+    (BG, PANEL, CARD, HOVER, HOVER2, BORDER, BORDER2) = (
+        p["BG"], p["PANEL"], p["CARD"], p["HOVER"], p["HOVER2"], p["BORDER"], p["BORDER2"])
+    (TEXT, TEXT2, MUTED) = (p["TEXT"], p["TEXT2"], p["MUTED"])
+    (SCROLL, SCROLL_HOVER, ROWLINE, FRAME, SKEL_A, SKEL_B, CONSOLE) = (
+        p["SCROLL"], p["SCROLL_HOVER"], p["ROWLINE"], p["FRAME"], p["SKEL_A"], p["SKEL_B"], p["CONSOLE"])
+    (BTN_DISABLED_BG, BTN_DISABLED_TEXT, BTN_DARK_DISABLED) = (
+        p["BTN_DISABLED_BG"], p["BTN_DISABLED_TEXT"], p["BTN_DARK_DISABLED"])
+    (ART_GRAD_A, ART_GRAD_B, ART_GRAD_C) = (p["ART_GRAD_A"], p["ART_GRAD_B"], p["ART_GRAD_C"])
+    (HERO_GRAD_A, HERO_GRAD_B, HERO_GRAD_C) = (p["HERO_GRAD_A"], p["HERO_GRAD_B"], p["HERO_GRAD_C"])
+    (SEARCH_GRAD_A, SEARCH_GRAD_B, SEARCH_GRAD_C) = (
+        p["SEARCH_GRAD_A"], p["SEARCH_GRAD_B"], p["SEARCH_GRAD_C"])
+    DRAWER = p["DRAWER"]
+    QSS = _qss()
+
+
+# Build the initial (dark) stylesheet at import.
+QSS = _qss()
 
 
 def polish(w: QWidget) -> None:

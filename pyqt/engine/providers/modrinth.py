@@ -55,11 +55,15 @@ class ModrinthProvider:
         Discover pager can show "of N results" and only enable Next when a
         real page remains — never guessing from a full page alone.
         """
+        # Map the shared sort vocabulary onto Modrinth's search index. Name has
+        # no server-side index here — the engine re-sorts by title client-side.
+        index_by_sort = {"downloads": "downloads", "updated": "updated", "name": "relevance"}
         params = urlencode({
             "query": opts.get("query", ""),
             "facets": self._build_facets(opts),
             "limit": str(opts.get("limit", 20)),
-            "index": opts.get("index", "relevance"),
+            "index": index_by_sort.get(opts.get("sort", "downloads"),
+                                        opts.get("index", "relevance")),
             "offset": str(opts.get("offset", 0)),
         })
         data = provider_get("modrinth", f"{BASE}/search?{params}")

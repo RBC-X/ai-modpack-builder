@@ -191,7 +191,8 @@ class ActivityView(QWidget):
 
         tabs_frame = QFrame(body)
         tabs_frame.setFixedSize(960, 42)
-        tabs_frame.setStyleSheet(f"border: none; border-bottom: 1px solid {theme.BORDER};")
+        tabs_frame.setProperty("cls", "tabs-bar")
+        theme.polish(tabs_frame)
         tabs = hbox(tabs_frame, 8, margins=(0, 0, 0, 8))
         self._tabs: dict[str, object] = {}
         tab_specs = [("feed", "Activity Feed", "activity"), ("logs", "Engine Logs", "terminal"),
@@ -493,6 +494,8 @@ def _save_state(st: dict) -> None:
 class SettingsView(QWidget):
     settings_changed = pyqtSignal(dict)
     manage_account_requested = pyqtSignal()
+    theme_changed = pyqtSignal(str)        # 'dark' | 'light' | 'system'
+    sidebar_changed = pyqtSignal(bool)     # compact flag
 
     def __init__(self, api):
         super().__init__()
@@ -527,7 +530,8 @@ class SettingsView(QWidget):
         nav.setSpacing(4)
         nav.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._nav_btns: dict[str, object] = {}
-        nav_specs = [("general", "General", "settings"), ("minecraft", "Minecraft", "globe"),
+        nav_specs = [("general", "General", "settings"), ("appearance", "Appearance", "eye"),
+                     ("minecraft", "Minecraft", "globe"),
                      ("java", "Java Runtime", "cpu"), ("providers", "API Providers", "key"),
                      ("ai", "AI Engine", "sparkles"), ("account", "Account", "user"),
                      ("cloud", "Cloud Sync", "cloud"), ("updates", "Updates", "refresh")]
@@ -556,7 +560,7 @@ class SettingsView(QWidget):
 
     def _set_sub(self, t: str) -> None:
         self._sub = t
-        icon_names = {"general": "settings", "minecraft": "globe", "java": "cpu",
+        icon_names = {"general": "settings", "appearance": "eye", "minecraft": "globe", "java": "cpu",
                       "providers": "key", "ai": "sparkles", "account": "user",
                       "cloud": "cloud", "updates": "refresh"}
         for tid, b in self._nav_btns.items():
@@ -676,6 +680,69 @@ class SettingsView(QWidget):
         st = _load_state()
         st[key] = val
         _save_state(st)
+
+    # -- Appearance -----------------------------------------------------
+    def _sub_appearance(self, s, d, p, hw) -> None:
+        self._panel_lay.addWidget(label(self._panel, "Appearance", "h3"))
+        self._panel_lay.addWidget(label(
+            self._panel,
+            "Theme and density apply immediately — no restart needed.",
+            "muted"))
+        st = _load_state()
+
+        # Theme: System / Dark / Light
+        theme_row = QHBoxLayout()
+        theme_col = vbox(self._panel, 2)
+        theme_col.addWidget(label(self._panel, "Theme", "sub"))
+        theme_col.addWidget(label(
+            self._panel,
+            "System follows the Windows light/dark setting; Dark is the flagship presentation.",
+            "muted"))
+        theme_row.addLayout(theme_col, 1)
+        theme_box = QComboBox(self._panel)
+        theme_box.addItems(["System", "Dark", "Light"])
+        current = str(st.get("theme") or "dark")
+        theme_box.setCurrentText({"system": "System", "dark": "Dark", "light": "Light"}.get(current, "Dark"))
+        theme_box.currentTextChanged.connect(lambda text: self._set_theme(
+            {"System": "system", "Dark": "dark", "Light": "light"}[text]))
+        theme_row.addWidget(theme_box)
+        self._panel_lay.addLayout(theme_row)
+
+        # Sidebar: Expanded / Compact
+        sb_row = QHBoxLayout()
+        sb_col = vbox(self._panel, 2)
+        sb_col.addWidget(label(self._panel, "Sidebar", "sub"))
+        sb_col.addWidget(label(
+            self._panel,
+            "Compact shows icons only with tooltips — more room for content.",
+            "muted"))
+        sb_row.addLayout(sb_col, 1)
+        sb_box = QComboBox(self._panel)
+        sb_box.addItems(["Expanded", "Compact"])
+        sb_box.setCurrentText("Compact" if bool(st.get("sidebarCompact")) else "Expanded")
+        sb_box.currentTextChanged.connect(
+            lambda text: self._set_sidebar(text == "Compact"))
+        sb_row.addWidget(sb_box)
+        self._panel_lay.addLayout(sb_row)
+
+        theme.set_mode(current)
+        self._panel_lay.addWidget(label(
+            self._panel,
+            f"Active palette: {theme.MODE} (applies app-wide on change)",
+            "mono muted"))
+
+    def _set_theme(self, pref: str) -> None:
+        st = _load_state()
+        st["theme"] = pref
+        _save_state(st)
+        theme.set_mode(pref)
+        self.theme_changed.emit(pref)
+
+    def _set_sidebar(self, compact: bool) -> None:
+        st = _load_state()
+        st["sidebarCompact"] = bool(compact)
+        _save_state(st)
+        self.sidebar_changed.emit(bool(compact))
 
     # -- Updates --------------------------------------------------------
     def _sub_updates(self, s, d, p, hw) -> None:
