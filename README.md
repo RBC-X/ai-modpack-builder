@@ -26,6 +26,15 @@ pyqt/.venv/Scripts/python pyqt/main.py
 
 The whole engine runs inside the app — no Node server, no localhost.
 
+## Screenshots
+
+Captured from the running app (offscreen render, real engine data):
+
+| | | |
+|---|---|---|
+| ![Home](screenshots/01-home.png) | ![Library](screenshots/02-library.png) | ![Pack overview](screenshots/03-pack-overview.png) |
+| ![Discover](screenshots/07-discover.png) | ![AI Builder](screenshots/08-ai-builder.png) | ![Launch](screenshots/12-launch-overlay.png) |
+
 ## What it does
 
 - **AI Builder** — describe a pack and watch the real build stream (interpret → search → select → resolve → conflict → download → test → repair → export), or start from an editable starter-concept template or Surprise Me.
