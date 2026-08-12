@@ -97,11 +97,32 @@ feed. The installed launcher's primary update path is the **public GitHub feed**
 **auto-update keeps working even if the mirror never starts**; the mirror is
 only a fallback for the old local feed URL.
 
+### Reboot test: DONE (2026-08-12, real reboot)
+
+One real reboot was performed and verified end-to-end. Evidence
+(`%LOCALAPPDATA%\AI Modpack Builder\workspace\reboot-verify.json`):
+
+- Machine rebooted (LastBootUpTime fresh); the HTTPS mirror **did** relaunch at
+  logon under a fresh pid (`mirrorListening: true, mirrorFeedVersion 1.0.6,
+  mirrorFeedHttp 200` over TLS).
+- The installed launcher checked the **public GitHub feed** with no dev flags
+  (`appOk: true, appCurrent: 1.0.6, appAvailable: false`).
+- **Timing finding**: the logon sequence on this machine is slow — the
+  registry Run key wasn't processed until ~2 minutes after boot and the
+  Startup-folder items ran ~3–4 minutes in. My first checks (2–3 min after
+  boot) were simply too early; the mirror was up by the ~4-minute mark.
+- **Hardening from the finding**: the mirror is now ALSO registered in
+  `HKCU\...\CurrentVersion\Run` (`pyqt/register_runkey_feed.ps1`) — the
+  path proven to be processed early — with the Startup-folder shortcut kept
+  as a redundant second hook. The one-shot verifier shortcut
+  (`AI Modpack Builder Reboot Verify.lnk`) was removed after use; the
+  verifier script (`pyqt/reboot_verify.ps1`) remains for future checks.
+
 Known gaps in the startup path (none break the primary GitHub update path):
 
-1. **The shortcut points into the dev workspace** (`…\OneDrive\Documents\Minecraft
-   Builder\pyqt\…`). If that folder is moved/renamed/deleted, the shortcut
-   silently fails — Startup shortcuts don't self-heal.
+1. **Both hooks point into the dev workspace** (`…\OneDrive\Documents\Minecraft
+   Builder\pyqt\…`). If that folder is moved/renamed/deleted, both the
+   Startup shortcut and the Run-key entry silently fail.
 2. **OneDrive files-on-demand**: at logon, if `workspace/feed-tls/cert.pem` /
    `key.pem` are not yet hydrated to local disk, the mirror exits
    ("missing TLS key/cert") and does not retry until the next logon.
@@ -110,8 +131,6 @@ Known gaps in the startup path (none break the primary GitHub update path):
    stderr). A task-scheduler equivalent with status would be better, but
    `schtasks /Create` is blocked by machine policy on this box.
 4. **Port 8543 collision** would fail the bind — harmless (process exits,
-   GitHub path unaffected).
-5. **VenV drift**: if `pyqt/.venv` is ever deleted, the shortcut fails silently.
-6. **A real reboot is the only full proof.** The logon mechanism itself was
-   verified live (shortcut launch), but nothing substitutes for one actual
-   reboot to confirm ordering (OneDrive hydration vs. startup-folder run).
+   GitHub path unaffected). With both hooks registered, a healthy logon
+   starts the mirror twice; the second instance fails to bind and exits.
+5. **VenV drift**: if `pyqt/.venv` is ever deleted, both hooks fail silently.
