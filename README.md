@@ -101,10 +101,18 @@ The legacy Node system (`src/`, `web/`, `tests/`, `api.py`) was **deleted on
 
 ## Requirements
 
-- Python 3.11+ and PyQt6 (`pyqt/requirements.txt`)
+**End users (installed via the signed installer):** nothing to install. The
+installer is self-contained — Python 3.11 and PyQt6 are bundled inside the
+app, so there is no runtime to set up. Java is auto-detected and
+auto-installed (Adoptium) on first launch when missing. A CurseForge API key
+is optional (Settings → Sources). Allow ~1.5 GB free disk for a full asset
+download (the tool budget-caps downloads).
+
+**Running from source (developers only):**
+
+- Python 3.11+ and PyQt6 (`pyqt/requirements.txt` — the only dependency)
 - Java 17 (for MC 1.20.x) / 21 (for MC ≥ 1.20.5) — auto-detected, auto-installable via Adoptium
 - CurseForge API key (optional; Settings page or `CF_API_KEY`)
-- ~1.5 GB free disk for a full asset download; the tool budget-caps downloads
 
 ## Layout
 
