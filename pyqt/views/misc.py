@@ -601,10 +601,10 @@ class SettingsView(QWidget):
             if "curseforgeApiKey" in patch:
                 configured = bool(res.get("keyConfigured"))
                 self._settings["curseforgeKeyConfigured"] = configured
-                if not configured:
-                    self._settings["curseforgeKeySource"] = "none"
-                elif self._settings.get("curseforgeKeySource") != "environment":
-                    self._settings["curseforgeKeySource"] = "settings"
+                # Trust the engine's resolution (environment / windows-secure-
+                # storage / built-in / none) rather than inferring locally — a
+                # per-user clear can fall back to the embedded default key.
+                self._settings["curseforgeKeySource"] = str(res.get("keySource") or "none")
                 self._settings["curseforgeApiKey"] = "********" if configured else ""
             if self._save_status is not None:
                 self._save_status.setText("Saved")
@@ -1050,13 +1050,20 @@ class SettingsView(QWidget):
         row.addStretch(1)
         key_ok = bool(s.get("curseforgeKeyConfigured"))
         key_source = str(s.get("curseforgeKeySource") or "none")
-        source_label = "Environment key" if key_source == "environment" else "Configured" if key_ok else "Not set"
+        source_label = {
+            "environment": "Environment key",
+            "windows-secure-storage": "Configured",
+            "built-in": "Built-in",
+        }.get(key_source, "Configured" if key_ok else "Not set")
         row.addWidget(label(cf, source_label, "green" if key_ok else "warn"))
         cfl.addLayout(row)
         keybox = QLineEdit(cf)
         keybox.setEchoMode(QLineEdit.EchoMode.Password)
         keybox.setClearButtonEnabled(True)
-        keybox.setPlaceholderText("Enter a replacement key..." if key_ok else "Enter your CurseForge API key...")
+        keybox.setPlaceholderText(
+            "Enter a replacement key (optional)..." if key_source == "built-in"
+            else "Enter a replacement key..." if key_ok
+            else "Enter your CurseForge API key...")
         keybox.setEnabled(key_source != "environment")
         cfl.addWidget(keybox)
         action_row = QHBoxLayout()
@@ -1114,7 +1121,9 @@ class SettingsView(QWidget):
         clear.clicked.connect(lambda: self._save({"curseforgeApiKey": ""}, lambda _res: self._render_panel()))
         provider_note = label(
             cf,
-            "CurseForge requires its official x-api-key credential. It is stored only in this computer's engine settings; the CF_API_KEY environment variable takes priority.",
+            "CurseForge ships with a publisher key built in, so it works with zero setup. "
+            "You can still enter your own key — it takes priority and is stored only in "
+            "this computer's engine settings; the CF_API_KEY environment variable wins over all.",
             "muted",
         )
         provider_note.setWordWrap(True)

@@ -97,7 +97,22 @@ class SettingsStore:
             pass
 
     def curseforge_key(self) -> str:
-        return os.environ.get("CF_API_KEY") or self._load_key()
+        """Resolve the CurseForge key: CF_API_KEY env -> per-user Windows DPAPI
+        store (Settings page) -> publisher-embedded default baked into released
+        installer builds. End users get CurseForge out of the box with no
+        configuration; power users can still override per-machine."""
+        return (os.environ.get("CF_API_KEY")
+                or self._load_key()
+                or _embedded_curseforge_key())
+
+    def curseforge_key_source(self) -> str:
+        if os.environ.get("CF_API_KEY"):
+            return "environment"
+        if self._load_key():
+            return "windows-secure-storage"
+        if _embedded_curseforge_key():
+            return "built-in"
+        return "none"
 
     def _key_path(self):
         return os.path.join(os.path.dirname(str(self.path)), "curseforge-key.dpapi")
@@ -121,6 +136,17 @@ class SettingsStore:
             return ""
         except Exception:
             return ""
+
+
+def _embedded_curseforge_key() -> str:
+    """Publisher-embedded default key from product_config. Imported lazily so
+    the module graph stays light in dev and the value is only read when a
+    per-user key is absent."""
+    try:
+        from product_config import EMBEDDED_CURSEFORGE_KEY
+        return (EMBEDDED_CURSEFORGE_KEY or "").strip()
+    except Exception:  # noqa: BLE001 — dev trees without the module resolve to none
+        return ""
 
 
 class _Blob(ctypes.Structure):

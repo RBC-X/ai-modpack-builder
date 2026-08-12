@@ -48,6 +48,23 @@ def run(cmd: list, timeout: int = 600, env: dict | None = None) -> subprocess.Co
     return subprocess.run([str(c) for c in cmd], capture_output=True, timeout=timeout, env=env)
 
 
+def embedded_cf_key() -> str:
+    """Publisher CurseForge key for THIS build, loaded from the git-ignored
+    pyqt/.secrets/curseforge-key.txt (or the AMB_EMBEDDED_CURSEFORGE_KEY env).
+    The committed product_config.py always ships an empty placeholder; only the
+    frozen bundle built from this secrets file carries the live key, and it is
+    never written to any repo-tracked file or the installer's update feed."""
+    env_key = os.environ.get("AMB_EMBEDDED_CURSEFORGE_KEY", "").strip()
+    if env_key:
+        return env_key
+    secrets = HERE / ".secrets" / "curseforge-key.txt"
+    try:
+        key = secrets.read_text(encoding="utf-8").strip()
+        return key if key and not key.startswith("#") else ""
+    except OSError:
+        return ""
+
+
 def find_iscc() -> Path | None:
     for cand in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
                  Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")):
@@ -62,10 +79,18 @@ def main() -> int:
         VERSION = sys.argv[sys.argv.index("--version") + 1].strip()
     sign = "--no-sign" not in sys.argv
     t0 = time.time()
+    cf_key = embedded_cf_key()
+    if cf_key:
+        print(f"[info] embedding publisher CurseForge key ({len(cf_key)} chars) into the bundle", flush=True)
+    else:
+        print("[warn] no CurseForge key found in pyqt/.secrets/curseforge-key.txt "
+              "or AMB_EMBEDDED_CURSEFORGE_KEY — this build will require a manual "
+              "key for CurseForge content", flush=True)
+    bundle_env = {**os.environ, "AMB_EMBEDDED_CURSEFORGE_KEY": cf_key}
     # ---- 1. PyInstaller bundle
     r = run([VENV_PY, "-m", "PyInstaller", str(SPEC),
              "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build" / "pyi"),
-             "--noconfirm", "--clean"], timeout=900)
+             "--noconfirm", "--clean"], timeout=900, env=bundle_env)
     bundle_ok = r.returncode == 0 and EXE.exists() and (APP_DIR / "_internal" / "assets" / "fonts").is_dir()
     phase("PyInstaller bundle", bundle_ok,
           f"{(EXE if EXE.exists() else APP_DIR)} ({_mb(APP_DIR)} MB)")

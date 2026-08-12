@@ -15,14 +15,29 @@ import os
 EMBEDDED_MICROSOFT_CLIENT_ID = ""
 MICROSOFT_CLIENT_ID = os.environ.get("MINECRAFT_CLIENT_ID", EMBEDDED_MICROSOFT_CLIENT_ID).strip()
 
+# Publisher-owned CurseForge API key baked into released installer builds so
+# end users never configure one (Modrinth needs no key at all — its API is
+# open). Resolution order in the engine: CF_API_KEY env -> per-user Windows
+# DPAPI store (Settings page) -> this embedded default.
+#
+# NEVER commit a live key here: this file is tracked, so the committed value
+# is always empty. build_installer.py injects the real key from the git-ignored
+# pyqt/.secrets/curseforge-key.txt (or the AMB_EMBEDDED_CURSEFORGE_KEY env) as
+# AMB_EMBEDDED_CURSEFORGE_KEY while invoking PyInstaller, so only the frozen
+# bundle carries it.
+EMBEDDED_CURSEFORGE_KEY = os.environ.get("AMB_EMBEDDED_CURSEFORGE_KEY", "").strip()
+
 # Single source of truth for the shipped build version. The installer
 # pipeline (pyqt/build_installer.py) reads this for the Inno Setup
 # MyAppVersion define, and the self-updater compares it against the update
 # feed. Bump it for every release.
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.10"
 
 # Default self-update feed for installed builds. Fresh installs auto-point
 # at this HTTPS feed (Settings → Updates prefills it; the startup check and
 # --check-update use it too), so end users never configure anything.
 # AMB_UPDATE_URL still wins as an environment override.
 DEFAULT_UPDATE_FEED_URL = "https://github.com/RBC-X/ai-modpack-builder/releases/latest/download/update.json"
+
+# Human-readable source label reported to the Settings UI for the key above.
+EMBEDDED_KEY_SOURCE_LABEL = "built-in"

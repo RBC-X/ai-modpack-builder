@@ -160,8 +160,7 @@ class PyEngine:
         out = {**settings}
         out["curseforgeApiKey"] = "••••••••" if resolved else ""
         out["curseforgeKeyConfigured"] = bool(resolved)
-        out["curseforgeKeySource"] = ("environment" if os.environ.get("CF_API_KEY")
-                                      else "windows-secure-storage" if resolved else "none")
+        out["curseforgeKeySource"] = self.settings_store.curseforge_key_source()
         return out
 
     def settings_post(self, patch: dict) -> dict:
@@ -187,7 +186,9 @@ class PyEngine:
             self.settings_store.clear_curseforge_key()
         self.settings_store.save(current)
         self._providers = None
-        return {"ok": True, "keyConfigured": bool(self.settings_store.curseforge_key())}
+        return {"ok": True,
+                "keyConfigured": bool(self.settings_store.curseforge_key()),
+                "keySource": self.settings_store.curseforge_key_source()}
 
     def hardware(self) -> dict:
         if self._hardware is None:
