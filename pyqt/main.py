@@ -782,7 +782,14 @@ class MainWindow(QMainWindow):
             lst, recs = res
             self.builds = lst
             self.records = recs
-            enriched = [self._enrich(b) for b in lst]
+            # One corrupt/partial record must never blank the whole library:
+            # enrich each pack independently and fall back to the raw summary.
+            enriched = []
+            for b in lst:
+                try:
+                    enriched.append(self._enrich(b))
+                except Exception:  # noqa: BLE001
+                    enriched.append(b)
             self.home.set_builds(enriched)
             self.library.set_builds(enriched)
             self.discover.set_builds(enriched)
@@ -981,6 +988,11 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(getattr(self, ATTR_BY_NAV[nav]))
         if nav in ("downloads", "activity", "settings"):
             getattr(self, ATTR_BY_NAV[nav]).showEvent(None)
+        # Packs must be current the moment the user looks: Home and Library
+        # re-read the engine's on-disk index on arrival (async, non-blocking)
+        # instead of waiting up to 20 s for the background refresh timer.
+        if nav in ("home", "library"):
+            self.refresh_builds()
 
     def open_detail(self, build_id: str) -> None:
         self._open_detail(build_id)
