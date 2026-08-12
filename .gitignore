@@ -1,0 +1,51 @@
+# ---- Runtime data & secrets (NEVER commit these) ----
+workspace/
+*.dpapi
+*.pem
+*.key
+*.pfx
+.env
+.env.*
+!*.env.example
+
+# ---- Installers are GitHub release assets, not repo content ----
+installers/
+
+# ---- PyInstaller build output ----
+dist/
+build/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pyre/
+
+# ---- Virtualenv ----
+pyqt/.venv/
+
+# ---- App/UI state (feed URLs, remembered pages, account prefs) ----
+pyqt/state.json
+pyqt/state.json.bak*
+
+# ---- Agent / tooling scratch ----
+.freebuff/
+*.log
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Local evidence / screenshots / test captures ----
+pyqt/*.png
+pyqt/screenshots/
+pyqt/reference_screenshots/
+work-*.txt
+work-*.stdout.txt
+work-*.stderr.txt
+logs/
+workspace-evidence/
+
+# Windows shortcut artifacts
+*.lnk

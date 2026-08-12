@@ -1,0 +1,36 @@
+[TEST] launching broken pack b-msma0f6z-eb74bcb8…
+[STATE] starting @ 0s — 
+[ENGINE] preparing Resolving Minecraft 1.20.1… | missing=None
+[ENGINE] installing Installing Minecraft 1.20.1 (libraries & assets)… | missing=None
+[WARN] status: Launcher engine timed out
+[ENGINE] loading Starting Minecraft… | missing=None
+[STATE] running @ 20s — Starting Minecraft…
+[ENGINE] error Fatal startup error — see log | missing=['almanac']
+[PASS] game crashed with: Fatal startup error — see log
+[PASS] missing deps extracted: ['almanac']
+[TEST] opening crash drawer…
+[PASS] crash drawer visible
+[PASS] missing deps include almanac: ['almanac']
+[TEST] clicking Add Missing Mods & Relaunch…
+[PASS] repaired game reached the main menu: Main menu reached — ready to play
+[TEST] pressing STOP…
+[PASS] instance stopped
+[REPORT] {
+  "build": "b-msma0f6z-eb74bcb8",
+  "startedAt": "18:11:13",
+  "crash": {
+    "kind": "crash",
+    "error": "Fatal startup error \u2014 see log",
+    "missingDeps": [
+      "almanac"
+    ]
+  },
+  "crashDrawerVisible": true,
+  "missingDepsShown": [
+    "almanac"
+  ],
+  "relaunched": true,
+  "stopped": true,
+  "finishedAt": "18:15:39"
+}
+[PASS] crash-repair loop verified

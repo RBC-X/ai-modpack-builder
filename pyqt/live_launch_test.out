@@ -1,0 +1,36 @@
+[TEST] launching b-msma0f6z-eb74bcb8 via MainWindow.play()…
+[STATE] starting @ 2s —  %
+[SAMPLE] t=7s engine: installing 36% | overlay: starting None%  | tail=25
+[SAMPLE] t=8s engine: loading 54% | overlay: starting None%  | tail=25
+[STATE] running @ 10s — Setting up user… 82%
+[SAMPLE] t=10s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=12s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=14s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=17s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=20s engine: loading 82% | overlay: running 82%  | tail=3
+[SAMPLE] t=22s engine: loading 82% | overlay: running 82%  | tail=8
+[SAMPLE] t=28s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=34s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=42s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=47s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=52s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=54s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=57s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=59s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=60s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=62s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=68s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=71s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=72s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=76s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=79s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=80s engine: loading 82% | overlay: running 82%  | tail=25
+[SAMPLE] t=82s engine: loading 92% | overlay: running 92%  | tail=25
+[SAMPLE] t=87s engine: loading 92% | overlay: running 92%  | tail=25
+[SAMPLE] t=92s engine: running 100% | overlay: running 92%  | tail=25
+[SAMPLE] t=94s engine: running 100% | overlay: running 100% MAIN MENU | tail=25
+[PASS] engine reached main menu; overlay reflected it: Main menu reached — ready to play
+[TEST] pressing STOP…
+[PASS] instance stopped after STOP
+[REPORT] {"build": "b-msma0f6z-eb74bcb8", "startedAt": "17:21:13", "phases": [{"t": 2, "mode": "starting", "stage": "", "progress": null}, {"t": 10, "mode": "running", "stage": "Setting up user\u2026", "progress": 82}], "log_tail_len": 25, "stopped": true, "finishedAt": "17:22:48"}
+[PASS] launch flow verified (mode=running, log_tail_len=25)

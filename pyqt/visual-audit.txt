@@ -1,0 +1,25 @@
+PyQt visual audit — real widget geometry (offscreen render)
+
+== 01-home (0 stable findings) ==
+
+== 02-library (0 stable findings) ==
+
+== 03-pack-overview (0 stable findings) ==
+
+== 04-pack-content (0 stable findings) ==
+
+== 05-pack-settings (0 stable findings) ==
+
+== 06-discover (0 stable findings) ==
+
+== 07-ai-builder (0 stable findings) ==
+
+== 08-downloads (0 stable findings) ==
+
+== 09-activity (0 stable findings) ==
+
+== 10-settings (0 stable findings) ==
+
+== 11-launch-overlay (0 stable findings) ==
+
+TOTAL findings: 0
