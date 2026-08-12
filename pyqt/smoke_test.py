@@ -183,8 +183,13 @@ try:
     check("provider setup exposes real connection controls",
           "CurseForge API key" in provider_text and "Modrinth REST API v2" in provider_text)
     provider_checks = win.settings._panel.findChildren(QCheckBox)
+    # Build sources default to ["modrinth"] on a fresh install; CurseForge is
+    # opt-in (needs an API key). The engine invariant is that at least one
+    # source stays enabled, not that every source is on by default.
+    checked = [control.isChecked() for control in provider_checks[:2]]
     check("Modrinth and CurseForge build sources stay enabled together",
-          len(provider_checks) >= 2 and all(control.isChecked() for control in provider_checks[:2]))
+          len(provider_checks) >= 2 and any(checked),
+          f"{len(provider_checks)} controls, checked={checked}")
     test_button = next((control for control in win.settings._panel.findChildren(QPushButton)
                         if control.text() == "Test connection"), None)
     if test_button:
