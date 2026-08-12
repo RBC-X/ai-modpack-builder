@@ -4,6 +4,20 @@ _Generated 2026-08-10T22:33:50.581Z from real artifacts — never hand-edited._
 
 ## Latest verified work (2026-08-12, real runs)
 
+- **1.0.8: periodic checks, rollback, and in-app release notes shipped via the live feed.**
+  The launcher re-checks the feed every 2 h while open (own throttle stamp;
+  honors the Settings toggle); Settings → Updates now shows a
+  **↺ RESTORE v<previous>** button fed by the saved installer pool
+  (`updater.rollback_candidate()` — newest version strictly older than the
+  running app, no re-download), guarded by a post-update health gate
+  (`last-applied.json` marker written on apply; next boot health-checks and
+  either clears it or toasts where to roll back). Feed release notes render
+  inline in the Updates panel and in the update toast; auto-check URL
+  priority fixed to env → user setting → default. Verified: unit checks,
+  extended autocheck toggle test, new `rollback_ui_test.py`, smoke, and
+  security regression all green; installed 1.0.7 updated in place to 1.0.8
+  (SHA `8403d066…1af2c`), reports up to date over the default feed, and all
+  new updater symbols are present in the installed binary (PYZ-extracted).
 - **1.0.7: default update feed embedded — fresh installs need zero config.**
   `DEFAULT_UPDATE_FEED_URL` (public GitHub feed) is baked into the build and
   `updater.update_url()` uses it when no env/setting exists; `check()` now

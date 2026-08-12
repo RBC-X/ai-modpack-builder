@@ -187,12 +187,13 @@ class MainWindow(QMainWindow):
         )
         self._resize_grip.raise_()
 
-    def _auto_check_update(self) -> None:
+    def _auto_check_update(self, stamp: str | None = None, hours: int = 24) -> None:
         """Throttled background update check for installed builds.
 
-        Runs once per 24 h when a feed is configured (AMB_UPDATE_URL or the
-        updateUrl setting in Settings → Updates); announces only if a newer
-        version is available. Silent in dev mode.
+        Runs at startup (once per 24 h) and periodically (every 2 h while the
+        app is open) when a feed is configured (AMB_UPDATE_URL, the updateUrl
+        setting, or the embedded default); announces only if a newer version
+        is available. Silent in dev mode.
         """
         from engine.core import data_dir
         import updater
@@ -201,12 +202,16 @@ class MainWindow(QMainWindow):
         if not st.get("autoCheckUpdates", True):
             return  # "Check for updates on startup" toggle is off
         dd = data_dir()
-        if not updater.should_auto_check(dd):
+        if not updater.should_auto_check(dd, hours=hours, stamp=stamp or updater.CHECK_STAMP):
             return
-        updater.stamp_check(dd)
-        url = updater.update_url()
+        updater.stamp_check(dd, stamp or updater.CHECK_STAMP)
+        # Priority: env override → the user's Settings URL → the embedded
+        # default feed. The default must never shadow a custom feed.
+        url = os.environ.get("AMB_UPDATE_URL", "").strip()
         if not url:
             url = st.get("updateUrl") or ""
+        if not url:
+            url = updater.update_url()
         if not url:
             return
 
@@ -215,7 +220,52 @@ class MainWindow(QMainWindow):
 
         def ok(res):
             if res.get("available"):
-                self.toast(f"Update {res.get('latest')} available — install it in Settings → Updates.", 8000)
+                notes = (res.get("notes") or "").strip()
+                first = notes.splitlines()[0][:140] if notes else ""
+                msg = f"Update {res.get('latest')} available — install it in Settings → Updates."
+                if first:
+                    msg = f"Update {res.get('latest')} available: {first}… Install in Settings → Updates."
+                self.toast(msg, 9000)
+
+        run_async(work, ok, lambda e: None)
+
+    def _periodic_update_check(self) -> None:
+        """Every 2 h while the launcher is open, reuse the throttled check with
+        its own stamp so it does not collide with the once-per-24 h startup
+        check (and never fires if the user disabled auto-checks)."""
+        import updater
+        self._auto_check_update(stamp=updater.PERIODIC_STAMP, hours=2)
+
+    def _check_update_health(self) -> None:
+        """After an update applies, the next boot health-checks the engine and
+        clears the marker; a failed health probe tells the user where to roll
+        back instead of leaving them with a broken install silently."""
+        from engine.core import data_dir
+        import updater
+        from product_config import APP_VERSION as CUR_VERSION
+        from views.misc import _load_state, _save_state
+        dd = data_dir()
+        applied = updater.applied_marker(dd)
+        if not applied:
+            return
+
+        def work():
+            try:
+                return bool(self.api.health())
+            except Exception:  # noqa: BLE001
+                return False
+
+        def ok(healthy: bool) -> None:
+            if healthy:
+                if applied != CUR_VERSION:
+                    self.toast(
+                        f"Update v{applied} did not take effect — still on v{CUR_VERSION}. "
+                        "Open Settings → Updates to retry or restore the previous version.", 10000)
+                updater.clear_applied_marker(dd)
+                return
+            self.toast(
+                "The last update did not pass its health check — open Settings → Updates "
+                "and use Restore previous version.", 12000)
 
         run_async(work, ok, lambda e: None)
 
@@ -485,11 +535,18 @@ class MainWindow(QMainWindow):
         self._import_state = {"stage": "Preparing import…", "done": 0, "total": 0}
         self._import_cancel: threading.Event | None = None
         self._warm_done = threading.Event()
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(2 * 3600 * 1000)  # every 2 h while open
+        self._update_timer.timeout.connect(self._periodic_update_check)
+        if getattr(sys, "frozen", False):
+            self._update_timer.start()
 
     def _bootstrap(self) -> None:
         self._check_health()
         self.refresh_builds()
         self._load_hardware()
+        if getattr(sys, "frozen", False):
+            self._check_update_health()
         if ("--selftest" not in sys.argv and "--check-update" not in sys.argv
                 and os.environ.get("AMB_DISABLE_CATALOG_WARMUP") != "1"):
             self._warm_catalogs()

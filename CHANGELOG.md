@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-12 — 1.0.8: periodic update checks, rollback, release notes in-app
+
+- **Periodic background update check**: the launcher now re-checks the feed
+  every 2 h while open (separate `PERIODIC_STAMP` throttle, so it never
+  collides with the once-per-24 h startup check), honoring the
+  Settings → Updates toggle. `pyqt/autocheck_toggle_test.py` extended to
+  cover the default-feed fallback and the periodic stamp.
+- **Rollback from the saved installer pool**: every applied update already
+  left its installer in `<data>/updates/` (1.0.1–1.0.8 all present here), so
+  `updater.rollback_candidate()` finds the newest version strictly older
+  than the running app and Settings → Updates shows a
+  **↺ RESTORE v<previous>** button that re-installs it (signature-verified,
+  `/DIR`-pinned — no re-download). `pyqt/rollback_ui_test.py` proves the
+  button renders with a candidate and names the right version.
+- **Post-update health gate**: `run_update(apply=True)` writes
+  `last-applied.json`; the next boot health-checks the engine and either
+  clears the marker (healthy) or toasts where to roll back (unhealthy), and
+  also flags an update that never took effect (marker version ≠ running
+  version). All three paths unit-tested.
+- **Release notes in the UI**: the feed's `notes` now render inline in the
+  Settings → Updates panel after a check finds an update (kept for the
+  confirmation dialog too), and the background-check toast shows the first
+  line of the notes.
+- **Feed-URL priority fixed for auto-checks**: env override → the user's
+  Settings URL → the embedded default, so a custom feed is never shadowed
+  by the default (previously the default won).
+- Shipped 1.0.8 through the live GitHub feed: installed 1.0.7 updated in
+  place (29,242,912 bytes, SHA `8403d066…1af2c` verified) and now reports
+  `ok, current 1.0.8, available false` over the default feed. All new
+  updater symbols confirmed compiled into the installed binary via PYZ
+  extraction.
+
 ## 2026-08-12 — 1.0.7: default update feed embedded + fresh-user update path proven
 
 - **Fresh installs now auto-point at the public GitHub feed.**

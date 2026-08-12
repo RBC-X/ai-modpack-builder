@@ -36,6 +36,7 @@ except Exception:  # noqa: BLE001  (module moved / not on path)
 
 DEFAULT_MAX_INSTALLER_MB = 600
 CHECK_STAMP = "last-update-check"  # filename inside data_dir for throttle
+PERIODIC_STAMP = "last-update-periodic-check"  # separate throttle for the 2 h in-app check
 EXPECTED_PUBLISHER = os.environ.get("AMB_UPDATE_PUBLISHER", "AI Modpack Builder").strip()
 
 
@@ -213,6 +214,13 @@ def run_update(url: str, apply: bool = False, dest_dir: Optional[Path] = None,
             proc = apply_installer(path, extra_dir or os.environ.get("AMB_UPDATE_DIR") or None)
             res["launchedPid"] = proc.pid
             res["applied"] = True
+            # Remember which version we just installed so the next boot can
+            # health-check it and offer a rollback if it fails.
+            try:
+                (dest.parent / ROLLBACK_MARKER).write_text(
+                    json.dumps({"version": res.get("latest", "")}), "utf-8")
+            except Exception:  # noqa: BLE001
+                pass
         else:
             res["applied"] = False
     except Exception as e:  # noqa: BLE001
@@ -221,21 +229,68 @@ def run_update(url: str, apply: bool = False, dest_dir: Optional[Path] = None,
     return res
 
 
-def should_auto_check(data_dir: Path, hours: int = 24) -> bool:
-    """Throttle the startup auto-check to once per N hours."""
-    stamp = data_dir / CHECK_STAMP
+def should_auto_check(data_dir: Path, hours: int = 24, stamp: str = CHECK_STAMP) -> bool:
+    """Throttle an auto-check to once per N hours (separate stamps allowed)."""
+    stamp_path = Path(data_dir) / stamp
     try:
         import time
-        age = time.time() - float(stamp.read_text().strip())
+        age = time.time() - float(stamp_path.read_text().strip())
         return age > hours * 3600
     except Exception:  # noqa: BLE001
         return True
 
 
-def stamp_check(data_dir: Path) -> None:
+def stamp_check(data_dir: Path, stamp: str = CHECK_STAMP) -> None:
     try:
         import time
-        data_dir.mkdir(parents=True, exist_ok=True)
-        (data_dir / CHECK_STAMP).write_text(str(time.time()), "utf-8")
+        Path(data_dir).mkdir(parents=True, exist_ok=True)
+        (Path(data_dir) / stamp).write_text(str(time.time()), "utf-8")
     except Exception:  # noqa: BLE001
         pass
+
+
+ROLLBACK_MARKER = "last-applied.json"  # inside data_dir: version the last update applied
+
+
+def applied_marker(data_dir: Path) -> str | None:
+    """Version recorded when the last update was launched, if any."""
+    try:
+        p = Path(data_dir) / ROLLBACK_MARKER
+        if p.exists():
+            return str(json.loads(p.read_text("utf-8")).get("version") or "").strip() or None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def clear_applied_marker(data_dir: Path) -> None:
+    try:
+        (Path(data_dir) / ROLLBACK_MARKER).unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def rollback_candidate(data_dir: Path) -> dict | None:
+    """Newest installer in the updates pool strictly older than the running app.
+
+    Every applied update leaves its installer in <data_dir>/updates/, so the
+    previous (or any older) version is always restorable without a re-download.
+    Returns {"version", "path"} or None.
+    """
+    pool = Path(data_dir) / "updates"
+    if not pool.is_dir():
+        return None
+    best: dict | None = None
+    try:
+        for f in pool.glob("AI-Modpack-Builder-Setup-*.exe"):
+            m = re.match(r"AI-Modpack-Builder-Setup-(?:v)?(\d+(?:\.\d+)*)\.exe$", f.name)
+            if not m:
+                continue
+            ver = m.group(1)
+            if version_tuple(ver) >= version_tuple(APP_VERSION):
+                continue  # same/never version is not a rollback target
+            if best is None or version_tuple(ver) > version_tuple(best["version"]):
+                best = {"version": ver, "path": f}
+    except Exception:  # noqa: BLE001
+        return None
+    return best

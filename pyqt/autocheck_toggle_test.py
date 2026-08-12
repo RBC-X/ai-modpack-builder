@@ -28,8 +28,8 @@ def fake_check(url, timeout=20):
 
 
 updater.check = fake_check
-updater.should_auto_check = lambda dd: True
-updater.stamp_check = lambda dd: None
+updater.should_auto_check = lambda dd, hours=24, stamp=None: True
+updater.stamp_check = lambda dd, stamp=None: None
 m.run_async = lambda fn, on_ok, on_err=None: on_ok(fn())
 
 
@@ -64,7 +64,8 @@ results.append(("toggle ON + URL -> check fires",
 CALLS.clear()
 set_state(True, "")
 bound()
-results.append(("toggle ON, no URL -> no check", len(CALLS) == 0))
+results.append(("toggle ON, no URL -> default feed used",
+                len(CALLS) == 1 and CALLS[0].startswith("https://github.com/RBC-X/ai-modpack-builder")))
 
 CALLS.clear()
 misc._load_state = lambda: {"updateUrl": "https://example.com/update.json"}  # default ON

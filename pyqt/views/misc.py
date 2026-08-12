@@ -679,6 +679,31 @@ class SettingsView(QWidget):
         self._panel_lay.addWidget(check)
         self._update_status = label(self._panel, "", "sub")
         self._panel_lay.addWidget(self._update_status)
+        self._update_notes_box = label(self._panel, "", "muted")
+        self._update_notes_box.setWordWrap(True)
+        self._panel_lay.addWidget(self._update_notes_box)
+
+        # Rollback: every applied update leaves its installer in the per-user
+        # updates pool, so the previous version is always restorable offline.
+        try:
+            from engine.core import data_dir
+            cand = updater.rollback_candidate(data_dir())
+        except Exception:  # noqa: BLE001
+            cand = None
+        if cand:
+            rb_row = QHBoxLayout()
+            rb_col = vbox(self._panel, 2)
+            rb_col.addWidget(label(self._panel, "Restore previous version", "sub"))
+            rb_col.addWidget(label(
+                self._panel,
+                f"If an applied update fails its health check or misbehaves, reinstall "
+                f"v{cand['version']} from the saved installer pool (no re-download).",
+                "muted"))
+            rb_row.addLayout(rb_col, 1)
+            rb = button(self._panel, f"↺ RESTORE v{cand['version']}", "btn-dark", "refresh")
+            rb.clicked.connect(lambda: self._restore_previous(cand["path"]))
+            rb_row.addWidget(rb)
+            self._panel_lay.addLayout(rb_row)
 
     def _save_update_url(self) -> None:
         st = _load_state()
@@ -695,6 +720,8 @@ class SettingsView(QWidget):
         self._update_status.setText("Checking for updates…")
         self._update_status.setProperty("cls", "")
         theme.polish(self._update_status)
+        if hasattr(self, "_update_notes_box"):
+            self._update_notes_box.setText("")
 
         def work():
             return updater.run_update(url, apply=False)
@@ -706,13 +733,18 @@ class SettingsView(QWidget):
             if not res.get("available"):
                 self._render_update_result(True, f"You are up to date (v{res.get('current')}).")
                 return
-            # Keep the full notes for the confirmation dialog (below); the
-            # status line stays short.
-            self._update_notes = (res.get("notes") or "").strip()
+            # Show the feed's release notes right in the panel, and keep the
+            # full text for the confirmation dialog (below).
+            notes = (res.get("notes") or "").strip()
+            self._update_notes = notes
             self._update_latest = res.get("latest")
             self._update_url = url
             self._render_update_result(
-                True, f"Update v{res.get('latest')} available — review the release notes before installing.")
+                True, f"Update v{res.get('latest')} available — release notes below.")
+            if notes and hasattr(self, "_update_notes_box"):
+                self._update_notes_box.setText(notes)
+                self._update_notes_box.setProperty("cls", "mono")
+                theme.polish(self._update_notes_box)
             btn = button(self._panel, f"⬇ DOWNLOAD & INSTALL v{res.get('latest')}",
                          "btn-primary", "download", theme.BG)
             btn.clicked.connect(self._confirm_update)
@@ -732,6 +764,26 @@ class SettingsView(QWidget):
             theme.polish(self._update_status)
         except RuntimeError:
             pass  # panel was rebuilt mid-check (section switched)
+
+    def _restore_previous(self, path) -> None:
+        """Reinstall the previous version from the saved installer pool."""
+        from PyQt6.QtWidgets import QApplication
+        p = str(path)
+
+        def work():
+            # Signature-verified the same way as a normal update, then launched
+            # with /DIR pinned to the running app's folder.
+            return updater.apply_installer(p)
+
+        def ok(proc):
+            self._render_update_result(
+                True, "Restore launched — the launcher will close while the previous version installs.")
+            QTimer.singleShot(1500, QApplication.instance().quit)
+
+        def err(e):
+            self._render_update_result(False, f"Restore failed: {e}")
+
+        run_async(work, ok, err)
 
     def _confirm_update(self) -> None:
         """Show the release notes and ask before downloading/installing."""
