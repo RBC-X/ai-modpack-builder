@@ -5,7 +5,7 @@ import json
 import os
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices, QPainter
+from PyQt6.QtGui import QColor, QDesktopServices, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout,
                              QLabel, QLineEdit, QPlainTextEdit, QScrollArea,
                              QSizePolicy, QSlider, QTextEdit, QVBoxLayout, QWidget)
@@ -529,6 +529,12 @@ class SettingsView(QFrame):
         self._overlay = parent is not None
         if self._overlay:
             self.hide()
+            # Escape closes the sheet like a native modal. WindowShortcut so it
+            # fires even when an inner control (line edit, combo) has focus;
+            # the visibility guard keeps it inert while the overlay is hidden.
+            esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+            esc.activated.connect(
+                lambda: self.close_requested.emit() if self.isVisible() else None)
 
         # Centered shell: header (title + close), top section nav, content.
         self._shell = QFrame(self)

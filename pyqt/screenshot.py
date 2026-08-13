@@ -100,6 +100,15 @@ win.settings.open_section("providers")
 snap(app, win, "11b-provider-settings")
 win.settings.open_section("account")
 snap(app, win, "11c-account-settings")
+# Remaining overlay tabs — every section of the new top-nav surface.
+for section, shot in [("appearance", "11e-appearance-settings"),
+                      ("minecraft", "11f-minecraft-settings"),
+                      ("java", "11g-java-settings"),
+                      ("ai", "11h-ai-settings"),
+                      ("cloud", "11i-cloud-settings")]:
+    win.settings.open_section(section)
+    snap(app, win, shot)
+win.settings.open_section("account")
 win.account_modal.show()
 for _ in range(8):
     app.processEvents()

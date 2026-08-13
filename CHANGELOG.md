@@ -13,6 +13,11 @@
 - **Settings → Updates gallery shot.** `14-settings-updates.png` renders the
   Updates panel with the feed's real release notes (markdown) and the install
   action visible; the CI screenshot gallery and README carry it.
+- **Every settings tab documented + Escape to close.** The gallery now
+  captures the remaining overlay sections (Appearance, Minecraft, Java, AI,
+  Cloud — `11e`…`11i`), and pressing **Esc** closes the overlay like a
+  native modal sheet, returning to the page it covered (the shortcut is
+  inert while the overlay is hidden).
 
 ## 2026-08-12 — 1.0.11: release notes in the update toast + stale-launch-state fix
 

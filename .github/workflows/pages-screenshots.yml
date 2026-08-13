@@ -72,8 +72,10 @@ jobs:
             01-home 02-library 03-pack-overview 04-pack-content 05-pack-logs \
             06-pack-settings 07-discover 07b-discover-details 08-ai-builder \
             09-downloads 10-activity 11-settings 11b-provider-settings \
-            11c-account-settings 11d-account-dialog 12-launch-overlay \
-            13-update-toast 14-settings-updates; do
+            11c-account-settings 11d-account-dialog 11e-appearance-settings \
+            11f-minecraft-settings 11g-java-settings 11h-ai-settings \
+            11i-cloud-settings 12-launch-overlay 13-update-toast \
+            14-settings-updates; do
             cp "pyqt/screenshots/$f.png" "screenshots/$f.png"
           done
           git add screenshots

@@ -6,7 +6,8 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PyQt6.QtCore import QEvent, QThreadPool
+from PyQt6.QtCore import QEvent, QThreadPool, Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 
 import theme
@@ -48,6 +49,23 @@ win.settings.close_requested.emit()
 app.processEvents()
 check("close hides the overlay", not win.settings.isVisible())
 check("close returns to home", win.active_nav == "home" and win.stack.currentWidget() is win.home)
+
+# Escape closes the sheet like a native modal
+win._set_nav("settings")
+app.processEvents()
+esc = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+QApplication.sendEvent(win, esc)
+app.processEvents()
+check("Escape closes the overlay", not win.settings.isVisible())
+check("Escape returns to the covered page",
+      win.active_nav == "home" and win.stack.currentWidget() is win.home)
+# Escape must NOT close the overlay when it is hidden (inert shortcut)
+win._set_nav("settings")
+app.processEvents()
+win.settings.hide()
+QApplication.sendEvent(win, esc)
+app.processEvents()
+check("Escape is inert while overlay hidden", not win.settings.isVisible())
 
 # re-open from providers shortcut (Discover path)
 win._set_nav("discover")
