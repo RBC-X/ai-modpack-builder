@@ -522,7 +522,9 @@ class SettingsView(QFrame):
     def __init__(self, api, parent=None):
         super().__init__(parent)
         self.api = api
-        self._sub = "general"
+        # Re-open on the section the user last used (persisted per launch in
+        # the UI state file; corrupt values fall back to General).
+        self._sub = self._restore_tab()
         self._settings: dict = {}
         self._hardware: dict = {}
         self._save_status = None
@@ -622,8 +624,19 @@ class SettingsView(QFrame):
             super().paintEvent(event)
 
     # -- nav ---------------------------------------------------------------
+    @staticmethod
+    def _restore_tab() -> str:
+        tab = str((_load_state() or {}).get("settingsTab") or "general")
+        if tab not in {tid for tid, _l, _tip, _ic in NAV_SPECS}:
+            return "general"
+        return tab
+
     def _set_sub(self, t: str) -> None:
         self._sub = t
+        # Remember the section for the next launch (re-opening lands here).
+        st = _load_state()
+        st["settingsTab"] = t
+        _save_state(st)
         icon_names = {tid: ic for tid, _l, _tip, ic in NAV_SPECS}
         for tid, b in self._nav_btns.items():
             b.setProperty("active", "true" if tid == t else "false")

@@ -88,6 +88,35 @@ app.processEvents()
 check("overlay covers resized window",
       win.settings.width() == win.width() and win.settings.height() == win.height())
 
+# ---- last-open tab persistence (hermetic: mock the UI state file) ----
+import views.misc as _misc
+_real_load, _real_save = _misc._load_state, _misc._save_state
+_state: dict = {}
+_misc._load_state = lambda: _state
+_misc._save_state = lambda st: _state.update(st)
+
+try:
+    win._set_nav("settings")
+    win.settings._set_sub("java")
+    app.processEvents()
+    win.settings.close_requested.emit()
+    app.processEvents()
+    win._set_nav("settings")
+    app.processEvents()
+    check("reopening lands on the last-used tab", win.settings._sub == "java")
+
+    _state["settingsTab"] = "nonsense"
+    fresh2 = _misc.SettingsView(PyEngine())
+    check("invalid saved tab falls back to General", fresh2._sub == "general")
+    fresh2.deleteLater()
+
+    _state["settingsTab"] = "cloud"
+    fresh = _misc.SettingsView(PyEngine())
+    check("fresh launch restores the persisted tab", fresh._sub == "cloud")
+    fresh.deleteLater()
+finally:
+    _misc._load_state, _misc._save_state = _real_load, _real_save
+
 failed = [r["name"] for r in report if r["status"] == "FAIL"]
 print("OVERLAY OVERALL:", "PASS" if not failed else f"FAIL {failed}", flush=True)
 win.close()

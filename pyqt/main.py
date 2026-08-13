@@ -13,8 +13,8 @@ import sys
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QIcon, QKeyEvent
 from PyQt6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
                              QMainWindow, QMessageBox, QPushButton, QStackedWidget,
                              QSizeGrip, QTextEdit, QVBoxLayout, QWidget)
@@ -1730,6 +1730,25 @@ def main() -> int:
             # legitimate. The load itself must not raise.
             res["checks"].append({"name": "builds load", "ok": True, "count": len(bids)})
             res["checks"].append({"name": "window constructed", "ok": win.isVisible()})
+            # The settings surface must lay on top of the page and close like
+            # a modal sheet (Escape) — the interaction the overlay release
+            # shipped. Visibility is set synchronously, so this needs no
+            # event-loop waiting.
+            try:
+                win._set_nav("settings")
+                app.processEvents()
+                shown = win.settings.isVisible() and bool(win.settings._overlay)
+                esc = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
+                                Qt.KeyboardModifier.NoModifier)
+                QApplication.sendEvent(win, esc)
+                app.processEvents()
+                closed = not win.settings.isVisible()
+                res["checks"].append({
+                    "name": "settings overlay + Escape close",
+                    "ok": shown and closed, "shown": shown, "closed": closed})
+            except Exception as _e:  # noqa: BLE001
+                res["checks"].append({"name": "settings overlay + Escape close",
+                                      "ok": False, "error": str(_e)})
             # The single most important property of an installed app: its
             # per-user workspace must be creatable and writable.
             ws = workspace_dir()

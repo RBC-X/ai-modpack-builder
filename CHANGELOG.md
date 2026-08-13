@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-12 — Settings as a floating overlay + Settings → Updates gallery shot
+## 2026-08-12 — 1.0.12: Settings overlay — every tab documented, Escape-to-close, remembered tab
 
 - **Settings is no longer a sidebar within a sidebar.** The Settings page is
   now a floating overlay that lays on top of the app: a translucent scrim,
@@ -18,6 +18,12 @@
   Cloud — `11e`…`11i`), and pressing **Esc** closes the overlay like a
   native modal sheet, returning to the page it covered (the shortcut is
   inert while the overlay is hidden).
+- **The last-used settings tab is remembered.** Re-opening Settings lands on
+  the section you were using — the tab persists in the UI state file per
+  launch, and corrupt values fall back to General.
+- **Frozen selftest gained a UI interaction check.** `--selftest` now opens
+  the settings overlay and verifies Escape closes it, so the installed
+  bundle proves the overlay actually works, not just that it ships.
 
 ## 2026-08-12 — 1.0.11: release notes in the update toast + stale-launch-state fix
 
