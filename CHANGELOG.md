@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-13 — 1.0.14: Library tiles stay square with few packs
+
+- **Fixed: single-row libraries regressed to tall rectangles.** With one or
+  two packs the grid's lone row stretched to fill the viewport, so tiles
+  measured ~508×558 (ratio 0.47) — the exact look the square-tile work
+  removed. Cards now have a Fixed vertical size policy, so every tile stays
+  at its natural near-square size (measured 262×252, ratio 1.04) regardless
+  of how many packs the library holds.
+- **`02-library` screenshot refreshed** to show the fixed tiles.
+
 ## 2026-08-13 — 1.0.13: Library square tiles + modpack artwork + fresh screenshot gallery
 
 - **Library cards are now smaller, squarer tiles.** The grid switched from

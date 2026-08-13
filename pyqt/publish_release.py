@@ -29,7 +29,20 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
-VERSION = "1.0.5"
+# Default to the real product version so publishing without --version can
+# never target a stale tag (this once silently recreated an old release).
+def _default_version() -> str:
+    try:
+        cfg = (HERE / "product_config.py").read_text("utf-8")
+        m = __import__("re").search(r'APP_VERSION\s*=\s*"([^"]+)"', cfg)
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    raise SystemExit("cannot determine APP_VERSION from product_config.py; pass --version")
+
+
+VERSION = _default_version()
 REPO = os.environ.get("GH_REPO", "").strip()
 ASSETS_DIR = ""
 NOTES = ""

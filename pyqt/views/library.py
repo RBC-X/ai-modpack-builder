@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QScrollArea, QVBoxLayout, QWidget)
+                             QLineEdit, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
@@ -177,6 +177,10 @@ class LibraryView(QWidget):
         c = QFrame(self)
         c.setProperty("cls", "card-selected" if b.get("buildId") == self.selected_id else "card")
         c.setMinimumHeight(252)
+        # Never stretch vertically: with only one row of tiles the grid row
+        # would expand to fill the viewport and cards regress to tall
+        # rectangles. Fixed keeps every tile at its natural (square-ish) size.
+        c.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         theme.polish(c)
         c.setCursor(Qt.CursorShape.PointingHandCursor)
         v = vbox(c, 0, margins=0)
