@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                             QLineEdit, QScrollArea, QVBoxLayout, QWidget)
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
-                    icon_pixmap, label, pill, vbox)
-from common import icon_cache
+                    label, pill, vbox)
+from views.misc import _load_state, _save_state
+from views.packcard import DENSITY_PARAMS, build_pack_card
 
 LOADERS = ["all", "Forge", "NeoForge", "Fabric", "Quilt", "Vanilla"]
 
@@ -22,6 +23,7 @@ class LibraryView(QWidget):
     new_pack_requested = pyqtSignal()
     navigate_ai = pyqtSignal()
     select_build = pyqtSignal(str)
+    density_changed = pyqtSignal(str)     # 'cozy' | 'compact' (Home mirrors it)
 
     def __init__(self):
         super().__init__()
@@ -30,6 +32,8 @@ class LibraryView(QWidget):
         self._view_mode = "grid"
         self._loader = "all"
         self._sort = "recent"
+        # Grid density is a per-user preference, remembered in the UI state file.
+        self._density = "compact" if str(_load_state().get("libraryDensity", "cozy")) == "compact" else "cozy"
 
         outer = QScrollArea(self)
         outer.setWidgetResizable(True)
@@ -75,6 +79,12 @@ class LibraryView(QWidget):
             bl.addWidget(p)
             self._loader_pills[f] = p
         bl.addStretch(1)
+        self._density_box = QComboBox(bar)
+        self._density_box.addItems(["Cozy", "Compact"])
+        self._density_box.setCurrentText("Compact" if self._density == "compact" else "Cozy")
+        self._density_box.setToolTip("Grid density — Cozy (larger tiles, 4-up) or Compact (smaller tiles, 5-up). Remembered for this user.")
+        self._density_box.currentTextChanged.connect(self._set_density)
+        bl.addWidget(self._density_box)
         self._sort_box = QComboBox(bar)
         self._sort_box.addItems(["Newest Builds", "Name", "Mod Count"])
         self._sort_box.currentIndexChanged.connect(self._on_sort)
@@ -113,6 +123,19 @@ class LibraryView(QWidget):
 
     def _on_sort(self, idx: int) -> None:
         self._sort = ["recent", "name", "mods"][idx]
+        self._render()
+
+    def _set_density(self, text: str) -> None:
+        """Switch grid density, persist it per user, and mirror it to Home so
+        both surfaces stay visually consistent immediately."""
+        density = "compact" if text == "Compact" else "cozy"
+        if density == self._density:
+            return
+        self._density = density
+        st = _load_state()
+        st["libraryDensity"] = density
+        _save_state(st)
+        self.density_changed.emit(density)
         self._render()
 
     def _render_pills(self) -> None:
@@ -159,10 +182,11 @@ class LibraryView(QWidget):
         items = self._filtered()
         self._empty.setVisible(not items)
         if self._view_mode == "grid":
-            # Adaptive columns: squarer tiles on wide windows (4-up), fewer on
-            # narrow ones. Target ~250 px per card so tiles read square.
+            # Adaptive columns driven by the density preset: compact targets
+            # ~205 px tiles (5-up on wide windows), cozy ~250 px (4-up).
+            p = DENSITY_PARAMS[self._density]
             avail = max(200, self.width() - 64)
-            cols = max(2, min(4, avail // 250))
+            cols = max(2, min(p["cols"], avail // p["target"]))
             card_w = (avail - (cols - 1) * 16) // cols
             for col in range(cols):
                 self._grid.setColumnStretch(col, 1)
@@ -174,127 +198,18 @@ class LibraryView(QWidget):
 
     # ------------------------------------------------------------------
     def _grid_card(self, b: dict, card_w: int) -> QFrame:
-        c = QFrame(self)
-        c.setProperty("cls", "card-selected" if b.get("buildId") == self.selected_id else "card")
-        c.setMinimumHeight(252)
-        # Never stretch vertically: with only one row of tiles the grid row
-        # would expand to fill the viewport and cards regress to tall
-        # rectangles. Fixed keeps every tile at its natural (square-ish) size.
-        c.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        theme.polish(c)
-        c.setCursor(Qt.CursorShape.PointingHandCursor)
-        v = vbox(c, 0, margins=0)
-
-        cover_url = b.get("coverUrl") or b.get("iconUrl")
-        test_status = str(b.get("testStatus") or "Not tested")
-        status_text = "Running" if b.get("running") else f"Test {test_status}"
-        status_cls = "pill-danger" if test_status == "FAIL" and not b.get("running") else "pill"
-        status_on = bool(b.get("running") or test_status in {"PASS", "FAIL"})
-
-        # Banner band: the pack's own image fills the tile (CurseForge style),
-        # with the status pill overlaid; packs without any image keep the
-        # gradient artwork band with avatar + name exactly as before.
-        artwork = QFrame(c)
-        artwork.setProperty("cls", "artwork")
-        artwork.setFixedHeight(132)
-        theme.polish(artwork)
-        if cover_url:
-            grid = QGridLayout(artwork)
-            grid.setContentsMargins(0, 0, 0, 0)
-            grid.setSpacing(0)
-            img = QLabel(artwork)
-            img.setPixmap(avatar(b.get("name") or "?", theme.GREEN, 132, 0))
-            icon_cache.request(cover_url, img, box=(card_w - 2, 131))
-            grid.addWidget(img, 0, 0)
-            overlay = QWidget(artwork)
-            ol = vbox(overlay, 0, margins=(12, 10, 12, 10))
-            row = QHBoxLayout()
-            row.addStretch(1)
-            row.addWidget(pill(artwork, status_text, status_on, status_cls))
-            ol.addLayout(row)
-            grid.addWidget(overlay, 0, 0)
-        else:
-            av = vbox(artwork, 10, margins=(16, 14, 16, 14))
-            status_row = QHBoxLayout()
-            status_row.addWidget(label(artwork, f"Updated {fmt_ago(b.get('createdAt'))}", "muted"))
-            status_row.addStretch(1)
-            status_row.addWidget(pill(artwork, status_text, status_on, status_cls))
-            av.addLayout(status_row)
-            av.addStretch(1)
-            top = QHBoxLayout()
-            top.setSpacing(12)
-            ic = QLabel(artwork)
-            ic.setFixedSize(48, 48)
-            url = b.get("iconUrl")
-            ic.setPixmap(avatar(b.get("name") or "?", theme.GREEN, 48, 10))
-            if url:
-                icon_cache.request(url, ic, 48)
-            top.addWidget(ic)
-            col = QVBoxLayout()
-            col.setSpacing(2)
-            t = label(artwork, b.get("name") or "Untitled", "h2")
-            t.setWordWrap(True)
-            col.addWidget(t)
-            col.addWidget(label(artwork, f"{b.get('mcVersion') or ''} • {(b.get('loader') or '').capitalize()}", "mono"))
-            top.addLayout(col, 1)
-            av.addLayout(top)
-        v.addWidget(artwork)
-
-        body = QWidget(c)
-        bv = vbox(body, 8, margins=(14, 10, 14, 10))
-        # Banner cards carry the name in the body; fallback cards already show
-        # it inside the artwork band — never repeat it.
-        if cover_url:
-            t = label(body, b.get("name") or "Untitled", "h3")
-            t.setWordWrap(True)
-            bv.addWidget(t)
-        else:
-            desc = label(body, (b.get("description") or b.get("request") or ""), "sub")
-            desc.setWordWrap(True)
-            desc.setMaximumHeight(34)
-            bv.addWidget(desc)
-
-        meta = QHBoxLayout()
-        meta.setSpacing(8)
-        ic2 = QLabel(body)
-        ic2.setPixmap(icon_pixmap("layers", theme.BLUE, 14))
-        meta.addWidget(ic2)
-        meta.addWidget(label(body, f"{b.get('modCount', 0)} Mods", "mono muted"))
-        meta.addStretch(1)
-        fit = str(b.get("hardwareFit") or "Not estimated")
-        if fit.lower() in {"not estimated", "auto", ""}:
-            fit_cls = "mono muted"
-        else:
-            fit_cls = "warn" if fit.lower() in {"heavy", "extreme"} else "mono green"
-        fit_label = label(body, fit, fit_cls)
-        fit_label.setToolTip(f"Hardware fit from this pack's performance estimate: {fit}")
-        meta.addWidget(fit_label)
-        bv.addLayout(meta)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        if b.get("running"):
-            stop = button(body, "STOP", "btn-danger")
-            stop.clicked.connect(lambda: self.stop_requested.emit(b.get("buildId")))
-            actions.addWidget(stop, 1)
-        else:
-            play = button(body, "PLAY", "btn-primary", "play", theme.BG)
-            play.clicked.connect(lambda: self.play_requested.emit(b.get("buildId")))
-            actions.addWidget(play, 1)
-        more = icon_btn(body, "more", "Manage content")
-        more.setFixedSize(34, 34)
-        more.clicked.connect(lambda: self.open_detail.emit(b.get("buildId")))
-        actions.addWidget(more)
-        trash = icon_btn(body, "trash", "Delete pack", theme.DANGER if not b.get("running") else theme.TEXT2)
-        trash.setFixedSize(34, 34)
-        trash.setEnabled(not b.get("running"))
-        trash.clicked.connect(lambda: self.delete_requested.emit(b.get("buildId")))
-        actions.addWidget(trash)
-        bv.addLayout(actions)
-        v.addWidget(body)
-
-        c.mousePressEvent = lambda e, bid=b.get("buildId"): self._clicked(e, bid)
-        return c
+        """Square tile with cover artwork — shared with the Home recent row so
+        both surfaces stay visually identical (see views/packcard.py)."""
+        return build_pack_card(
+            self, b, card_w,
+            density=self._density,
+            selected=b.get("buildId") == self.selected_id,
+            on_click=lambda e, bid=b.get("buildId"): self._clicked(e, bid),
+            on_play=lambda bid=b.get("buildId"): self.play_requested.emit(bid),
+            on_stop=lambda bid=b.get("buildId"): self.stop_requested.emit(bid),
+            on_open=lambda bid=b.get("buildId"): self.open_detail.emit(bid),
+            on_delete=lambda bid=b.get("buildId"): self.delete_requested.emit(bid),
+        )
 
     def _list_card(self, b: dict) -> QFrame:
         c = QFrame(self)

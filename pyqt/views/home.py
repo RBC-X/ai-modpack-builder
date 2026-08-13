@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTex
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
                     icon_pixmap, label, pill, vbox)
-from icons import ICONS
+from views.misc import _load_state
+from views.packcard import DENSITY_PARAMS, build_pack_card
 
 # Rotating example prompts shown when the hero field is empty (§26). They
 # seed a coherent brief — never a fake mod list.
@@ -27,6 +28,7 @@ class HomeView(QWidget):
     navigate = pyqtSignal(str)
     import_requested = pyqtSignal()
     select_build = pyqtSignal(str)
+    delete_requested = pyqtSignal(str)
     seed_requested = pyqtSignal(str)      # composed concept brief → AI Builder
 
     def __init__(self, hardware: dict | None = None):
@@ -37,6 +39,9 @@ class HomeView(QWidget):
         self._hero_icon: QLabel | None = None
         self._idea_idx = 0
         self._idea_timer: QTimer | None = None
+        # Mirror the Library's per-user grid density so the recent row always
+        # matches the tiles in the Library (live-synced via set_density).
+        self._density = "compact" if str(_load_state().get("libraryDensity", "cozy")) == "compact" else "cozy"
 
         outer = QScrollArea(self)
         outer.setWidgetResizable(True)
@@ -310,6 +315,13 @@ class HomeView(QWidget):
         d.exec()
 
     # ------------------------------------------------------------------
+    def set_density(self, density: str) -> None:
+        """Keep the recent row's tiles in step with the Library grid density."""
+        d = "compact" if density == "compact" else "cozy"
+        if d != self._density:
+            self._density = d
+            self._render_recent()
+
     def set_hardware(self, hardware: dict | None) -> None:
         self.hardware = hardware
         self._render()
@@ -435,42 +447,33 @@ class HomeView(QWidget):
             w = item.widget()
             if w:
                 w.deleteLater()
+        # Exactly the Library grid's density math — Home places its (at most
+        # three) recent packs in the first columns of an identical grid, so the
+        # tiles are pixel-for-pixel the same size as the Library's. Trailing
+        # empty columns simply take no width.
+        p = DENSITY_PARAMS[self._density]
+        avail = max(200, self.width() - 64)
+        cols = max(2, min(p["cols"], avail // p["target"]))
+        card_w = (avail - (cols - 1) * 16) // cols
         for i, b in enumerate(self.builds[:3]):
-            r = i // 3
-            c = i % 3
+            r = i // cols
+            c = i % cols
             self._recent_grid.setColumnStretch(c, 1)
-            self._recent_grid.addWidget(self._recent_card(b), r, c)
+            self._recent_grid.addWidget(self._recent_card(b, card_w), r, c)
 
-    def _recent_card(self, b: dict) -> QFrame:
-        c = QFrame(self)
-        c.setProperty("cls", "card-selected" if b.get("buildId") == self.selected_id else "card")
-        c.setMinimumHeight(112)
-        theme.polish(c)
-        c.setCursor(Qt.CursorShape.PointingHandCursor)
-        row = hbox(c, 14, margins=(16, 16, 16, 16))
-        ic = QLabel(c)
-        ic.setFixedSize(64, 64)
-        url = b.get("iconUrl")
-        ic.setPixmap(avatar(b.get("name") or "?", theme.GREEN, 64, 11))
-        if url:
-            from common import icon_cache
-            icon_cache.request(url, ic, 64)
-        row.addWidget(ic, 0, Qt.AlignmentFlag.AlignVCenter)
-        col = vbox(c, 2)
-        t = label(c, b.get("name") or "Untitled", "h3")
-        t.setWordWrap(True)
-        col.addWidget(t)
-        meta = label(c, f"{b.get('mcVersion') or ''} • {(b.get('loader') or '').capitalize()}", "mono")
-        col.addWidget(meta)
-        meta2 = label(c, f"{b.get('modCount', 0)} Mods • {fmt_ago(b.get('createdAt'))}", "muted")
-        col.addWidget(meta2)
-        row.addLayout(col, 1)
-        play = icon_btn(c, "play", "Play instance", theme.GREEN)
-        play.clicked.connect(lambda: self.play_requested.emit(b.get("buildId")))
-        row.addWidget(play, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        c.mousePressEvent = lambda e, bid=b.get("buildId"): self._card_clicked(e, bid)
-        return c
+    def _recent_card(self, b: dict, card_w: int) -> QFrame:
+        """The exact same square tile as the Library grid (views/packcard.py),
+        so the two surfaces always look identical."""
+        return build_pack_card(
+            self, b, card_w,
+            density=self._density,
+            selected=b.get("buildId") == self.selected_id,
+            on_click=lambda e, bid=b.get("buildId"): self._card_clicked(e, bid),
+            on_play=lambda bid=b.get("buildId"): self.play_requested.emit(bid),
+            on_stop=lambda bid=b.get("buildId"): self.stop_requested.emit(bid),
+            on_open=lambda bid=b.get("buildId"): self.open_detail.emit(bid),
+            on_delete=lambda bid=b.get("buildId"): self.delete_requested.emit(bid),
+        )
 
     def _card_clicked(self, event, bid: str) -> None:
         self.selected_id = bid

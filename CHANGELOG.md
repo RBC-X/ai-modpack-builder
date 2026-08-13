@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-13 — Home tiles + Library density control
+
+- **Home's recent-build row now uses the exact same square tile as the
+  Library** — cover artwork band (or gradient fallback), status pill, name,
+  meta, and PLAY / STOP / manage / delete actions. The tile builder is shared
+  (`views/packcard.py`) so the two surfaces can never drift; the Home row
+  places its up-to-three packs in the first columns of the same density grid
+  as the Library, so tiles are pixel-identical in size (246×252 cozy).
+- **New Library grid density control: Cozy / Compact.** The filter bar gains
+  a density picker — Cozy renders larger 4-up tiles (~250 px), Compact
+  renders smaller 5-up tiles (~205 px). The choice is remembered per user in
+  the UI state file (`libraryDensity`), restored on the next launch, and
+  live-mirrored to the Home recent row via a new `density_changed` signal.
+- **Fixed a real clipping defect found by the density work:** grid columns
+  size to content hints, so the old 5-up compact row would have clipped and
+  the artwork band would have mismatched the tile. Tiles now lock their
+  width to the computed column width (artwork crop included).
+- **Home recent cards also gained delete** (was play-only), matching the
+  Library tile's action set with the same confirmation flow.
+- `01-home` and `02-library` screenshots refreshed.
+
 ## 2026-08-13 — 1.0.14: Library tiles stay square with few packs
 
 - **Fixed: single-row libraries regressed to tall rectangles.** With one or
