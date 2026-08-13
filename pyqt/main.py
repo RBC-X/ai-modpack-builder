@@ -879,15 +879,25 @@ class MainWindow(QMainWindow):
         sel = rec.get("selections") or []
         nodes = ((rec.get("graph") or {}).get("nodes") or {})
         icon_url = None
+        cover_url = rec.get("coverUrl") or None
         for s in sel[:6]:
             key = s.get("key") or f"{s.get('provider')}:{s.get('projectId')}"
             project = (nodes.get(key) or {}).get("project") or {}
-            if project.get("iconUrl"):
-                icon_url = project.get("iconUrl")
+            # Cover: prefer a real gallery screenshot (CurseForge-style banner),
+            # falling back to the project icon so every pack with any image
+            # gets a picture instead of a letter tile.
+            if not cover_url:
+                gallery = project.get("gallery") or []
+                if gallery and (gallery[0].get("url") or gallery[0].get("thumbnailUrl")):
+                    cover_url = gallery[0].get("url") or gallery[0].get("thumbnailUrl")
+            if not icon_url:
+                if project.get("iconUrl"):
+                    icon_url = project.get("iconUrl")
+                elif s.get("provider") == "modrinth" and s.get("projectId"):
+                    icon_url = f"https://cdn.modrinth.com/data/{s['projectId']}/icon.png"
+            if icon_url and cover_url:
                 break
-            if s.get("provider") == "modrinth" and s.get("projectId"):
-                icon_url = f"https://cdn.modrinth.com/data/{s['projectId']}/icon.png"
-                break
+        cover_url = cover_url or icon_url
         mc_version = reqs.get("minecraftVersion") or ""
         loader_name = reqs.get("loader") or ""
         raw_description = rec.get("request") or rec.get("finalReport") or ""
@@ -912,6 +922,7 @@ class MainWindow(QMainWindow):
             "hardwareFit": hardware_fit,
             "ramTarget": ram_target,
             "iconUrl": icon_url,
+            "coverUrl": cover_url,
         }
 
     def _update_dl_badge(self) -> None:

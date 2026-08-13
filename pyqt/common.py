@@ -153,13 +153,27 @@ class _ImageWorker(QRunnable):
             pass
 
 
+def _fit_pixmap(pm: QPixmap, size: int, box: Optional[tuple] = None) -> QPixmap:
+    """Scale a cached pixmap for a label: square by default, or fill-crop a
+    (w, h) box (banner/cover images — like CurseForge cards)."""
+    if box:
+        w, h = box
+        scaled = pm.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                           Qt.TransformationMode.SmoothTransformation)
+        x = max(0, (scaled.width() - w) // 2)
+        y = max(0, (scaled.height() - h) // 2)
+        return scaled.copy(x, y, min(w, scaled.width() - x), min(h, scaled.height() - y))
+    return pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                     Qt.TransformationMode.SmoothTransformation)
+
+
 class IconCache(QObject):
     ready = pyqtSignal(str, object)  # url, bytes | None
 
     def __init__(self):
         super().__init__()
         self._cache: dict[str, QPixmap] = {}
-        self._pending: dict[str, list[tuple[QLabel, int]]] = {}
+        self._pending: dict[str, list[tuple]] = {}
         self._loading: set[str] = set()
         self._failed_at: dict[str, float] = {}
         local = os.environ.get("LOCALAPPDATA")
@@ -173,27 +187,29 @@ class IconCache(QObject):
     def pixmap_for(self, url: str, size: int = 48) -> Optional[QPixmap]:
         pm = self._cache.get(url)
         if pm and not pm.isNull():
-            return pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
-                             Qt.TransformationMode.SmoothTransformation)
+            return _fit_pixmap(pm, size)
         self.request(url, None, size)
         return None
 
-    def request(self, url: str, label: Optional[QLabel], size: int = 48) -> None:
+    def request(self, url: str, label: Optional[QLabel], size: int = 48,
+                box: Optional[tuple] = None) -> None:
+        """Queue an image load. `box=(w, h)` fills and center-crops the band
+        (banner covers); the default keeps the square-icon behavior."""
         if not url or self._closed:
             return
         pm = self._cache.get(url)
         if pm and not pm.isNull():
             if label:
                 try:
-                    label.setPixmap(pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
-                                              Qt.TransformationMode.SmoothTransformation))
+                    label.setPixmap(_fit_pixmap(pm, size, box))
                 except RuntimeError:
                     pass
             return
         if label is not None:
             waiting = self._pending.setdefault(url, [])
-            if not any(existing is label and existing_size == size for existing, existing_size in waiting):
-                waiting.append((label, size))
+            if not any(existing is label and existing_size == size and existing_box == box
+                       for existing, existing_size, existing_box in waiting):
+                waiting.append((label, size, box))
         if url in self._loading:
             return
         # Avoid hammering a broken URL while cards are re-rendered.
@@ -220,13 +236,12 @@ class IconCache(QObject):
         labels = self._pending.pop(url, [])
         if pm.isNull():
             return
-        for target, size in labels:
+        for target, size, box in labels:
             try:
                 # Apply even when a parent page is currently hidden. Checking
                 # isVisible() here discarded fast cache hits before a new card
                 # had been inserted into its layout.
-                target.setPixmap(pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
-                                           Qt.TransformationMode.SmoothTransformation))
+                target.setPixmap(_fit_pixmap(pm, size, box))
             except RuntimeError:
                 pass  # card was deleted while the request was in flight
 

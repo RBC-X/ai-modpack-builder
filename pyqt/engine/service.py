@@ -2038,6 +2038,13 @@ class PyEngine:
         rec = self.create_pack(name=proj["title"],
                                mc=(v.get("gameVersions") or ["1.20.1"])[0],
                                loader=(v.get("loaders") or ["fabric"])[0])
+        # Keep the modpack's own artwork so the Library card can show a
+        # CurseForge-style banner for the pack itself.
+        gallery = proj.get("gallery") or []
+        if gallery and (gallery[0].get("url") or gallery[0].get("thumbnailUrl")):
+            rec["coverUrl"] = gallery[0].get("url") or gallery[0].get("thumbnailUrl")
+        elif proj.get("iconUrl"):
+            rec["coverUrl"] = proj.get("iconUrl")
         bdir = self._build_dir(rec["buildId"])
         rec["request"] = f"Imported {proj['title']} from {provider}"
         dl_dir = bdir / "imports"

@@ -159,64 +159,96 @@ class LibraryView(QWidget):
         items = self._filtered()
         self._empty.setVisible(not items)
         if self._view_mode == "grid":
-            for col in range(3):
+            # Adaptive columns: squarer tiles on wide windows (4-up), fewer on
+            # narrow ones. Target ~250 px per card so tiles read square.
+            avail = max(200, self.width() - 64)
+            cols = max(2, min(4, avail // 250))
+            card_w = (avail - (cols - 1) * 16) // cols
+            for col in range(cols):
                 self._grid.setColumnStretch(col, 1)
             for i, b in enumerate(items):
-                self._grid.addWidget(self._grid_card(b), i // 3, i % 3)
+                self._grid.addWidget(self._grid_card(b, card_w), i // cols, i % cols)
         else:
             for i, b in enumerate(items):
                 self._grid.addWidget(self._list_card(b), i, 0)
 
     # ------------------------------------------------------------------
-    def _grid_card(self, b: dict) -> QFrame:
+    def _grid_card(self, b: dict, card_w: int) -> QFrame:
         c = QFrame(self)
         c.setProperty("cls", "card-selected" if b.get("buildId") == self.selected_id else "card")
-        c.setMinimumHeight(292)
+        c.setMinimumHeight(252)
         theme.polish(c)
         c.setCursor(Qt.CursorShape.PointingHandCursor)
         v = vbox(c, 0, margins=0)
 
-        artwork = QFrame(c)
-        artwork.setProperty("cls", "artwork")
-        artwork.setFixedHeight(124)
-        theme.polish(artwork)
-        av = vbox(artwork, 10, margins=(16, 14, 16, 14))
-        status_row = QHBoxLayout()
-        status_row.addWidget(label(artwork, f"Updated {fmt_ago(b.get('createdAt'))}", "muted"))
-        status_row.addStretch(1)
+        cover_url = b.get("coverUrl") or b.get("iconUrl")
         test_status = str(b.get("testStatus") or "Not tested")
         status_text = "Running" if b.get("running") else f"Test {test_status}"
         status_cls = "pill-danger" if test_status == "FAIL" and not b.get("running") else "pill"
-        status_row.addWidget(pill(artwork, status_text, bool(b.get("running") or test_status in {"PASS", "FAIL"}), status_cls))
-        av.addLayout(status_row)
-        av.addStretch(1)
+        status_on = bool(b.get("running") or test_status in {"PASS", "FAIL"})
 
-        top = QHBoxLayout()
-        top.setSpacing(12)
-        ic = QLabel(artwork)
-        ic.setFixedSize(48, 48)
-        url = b.get("iconUrl")
-        ic.setPixmap(avatar(b.get("name") or "?", theme.GREEN, 48, 10))
-        if url:
-            icon_cache.request(url, ic, 48)
-        top.addWidget(ic)
-        col = QVBoxLayout()
-        col.setSpacing(2)
-        t = label(artwork, b.get("name") or "Untitled", "h2")
-        t.setWordWrap(True)
-        col.addWidget(t)
-        col.addWidget(label(artwork, f"{b.get('mcVersion') or ''} • {(b.get('loader') or '').capitalize()}", "mono"))
-        top.addLayout(col, 1)
-        av.addLayout(top)
+        # Banner band: the pack's own image fills the tile (CurseForge style),
+        # with the status pill overlaid; packs without any image keep the
+        # gradient artwork band with avatar + name exactly as before.
+        artwork = QFrame(c)
+        artwork.setProperty("cls", "artwork")
+        artwork.setFixedHeight(132)
+        theme.polish(artwork)
+        if cover_url:
+            grid = QGridLayout(artwork)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setSpacing(0)
+            img = QLabel(artwork)
+            img.setPixmap(avatar(b.get("name") or "?", theme.GREEN, 132, 0))
+            icon_cache.request(cover_url, img, box=(card_w - 2, 131))
+            grid.addWidget(img, 0, 0)
+            overlay = QWidget(artwork)
+            ol = vbox(overlay, 0, margins=(12, 10, 12, 10))
+            row = QHBoxLayout()
+            row.addStretch(1)
+            row.addWidget(pill(artwork, status_text, status_on, status_cls))
+            ol.addLayout(row)
+            grid.addWidget(overlay, 0, 0)
+        else:
+            av = vbox(artwork, 10, margins=(16, 14, 16, 14))
+            status_row = QHBoxLayout()
+            status_row.addWidget(label(artwork, f"Updated {fmt_ago(b.get('createdAt'))}", "muted"))
+            status_row.addStretch(1)
+            status_row.addWidget(pill(artwork, status_text, status_on, status_cls))
+            av.addLayout(status_row)
+            av.addStretch(1)
+            top = QHBoxLayout()
+            top.setSpacing(12)
+            ic = QLabel(artwork)
+            ic.setFixedSize(48, 48)
+            url = b.get("iconUrl")
+            ic.setPixmap(avatar(b.get("name") or "?", theme.GREEN, 48, 10))
+            if url:
+                icon_cache.request(url, ic, 48)
+            top.addWidget(ic)
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            t = label(artwork, b.get("name") or "Untitled", "h2")
+            t.setWordWrap(True)
+            col.addWidget(t)
+            col.addWidget(label(artwork, f"{b.get('mcVersion') or ''} • {(b.get('loader') or '').capitalize()}", "mono"))
+            top.addLayout(col, 1)
+            av.addLayout(top)
         v.addWidget(artwork)
 
         body = QWidget(c)
-        bv = vbox(body, 10, margins=(16, 14, 16, 14))
-        desc = label(body, (b.get("description") or b.get("request") or ""), "sub")
-        desc.setWordWrap(True)
-        desc.setMinimumHeight(40)
-        desc.setMaximumHeight(40)
-        bv.addWidget(desc)
+        bv = vbox(body, 8, margins=(14, 10, 14, 10))
+        # Banner cards carry the name in the body; fallback cards already show
+        # it inside the artwork band — never repeat it.
+        if cover_url:
+            t = label(body, b.get("name") or "Untitled", "h3")
+            t.setWordWrap(True)
+            bv.addWidget(t)
+        else:
+            desc = label(body, (b.get("description") or b.get("request") or ""), "sub")
+            desc.setWordWrap(True)
+            desc.setMaximumHeight(34)
+            bv.addWidget(desc)
 
         meta = QHBoxLayout()
         meta.setSpacing(8)
@@ -246,11 +278,11 @@ class LibraryView(QWidget):
             play.clicked.connect(lambda: self.play_requested.emit(b.get("buildId")))
             actions.addWidget(play, 1)
         more = icon_btn(body, "more", "Manage content")
-        more.setFixedSize(36, 36)
+        more.setFixedSize(34, 34)
         more.clicked.connect(lambda: self.open_detail.emit(b.get("buildId")))
         actions.addWidget(more)
         trash = icon_btn(body, "trash", "Delete pack", theme.DANGER if not b.get("running") else theme.TEXT2)
-        trash.setFixedSize(36, 36)
+        trash.setFixedSize(34, 34)
         trash.setEnabled(not b.get("running"))
         trash.clicked.connect(lambda: self.delete_requested.emit(b.get("buildId")))
         actions.addWidget(trash)
