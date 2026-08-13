@@ -32,6 +32,25 @@ ROOT = HERE.parent
 VERSION = "1.0.5"
 REPO = os.environ.get("GH_REPO", "").strip()
 ASSETS_DIR = ""
+NOTES = ""
+
+
+def release_notes() -> str:
+    """Feed 'notes' for this version: explicit --notes, else the newest
+    CHANGELOG section (markdown) — so the update toast and Settings → Updates
+    render real release notes before the user applies."""
+    if NOTES.strip():
+        return NOTES.strip()
+    try:
+        text = (ROOT / "CHANGELOG.md").read_text("utf-8")
+        # The first "## " section after the intro is the newest entry.
+        start = text.find("## ")
+        if start < 0:
+            return ""
+        nxt = text.find("\n## ", start + 3)
+        return text[start:nxt if nxt > 0 else None].strip()
+    except OSError:
+        return ""
 
 
 def sha256_of(path: Path) -> str:
@@ -54,7 +73,7 @@ def gh_authed() -> bool:
 
 
 def main() -> int:
-    global VERSION, REPO, ASSETS_DIR
+    global VERSION, REPO, ASSETS_DIR, NOTES
     args = sys.argv[1:]
     if "--version" in args:
         VERSION = args[args.index("--version") + 1]
@@ -62,6 +81,8 @@ def main() -> int:
         REPO = args[args.index("--repo") + 1]
     if "--assets" in args:
         ASSETS_DIR = args[args.index("--assets") + 1]
+    if "--notes" in args:
+        NOTES = args[args.index("--notes") + 1]
 
     setup = ROOT / "installers" / f"AI-Modpack-Builder-Setup-{VERSION}.exe"
     if not setup.exists():
@@ -81,7 +102,7 @@ def main() -> int:
         installer_url = f"{base}/AI-Modpack-Builder-Setup-{VERSION}.exe"
         feed = {
             "version": VERSION,
-            "notes": f"{VERSION} release — see the release description on GitHub.",
+            "notes": release_notes() or f"{VERSION} release — see the release description on GitHub.",
             "installerUrl": installer_url,
             "installerSha256": sha,
         }

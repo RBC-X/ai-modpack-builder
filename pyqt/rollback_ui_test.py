@@ -65,9 +65,10 @@ sv._update_url = "https://example.com/update.json"
 sv._update_latest = "1.0.7"
 sv._render_update_result(True, f"Update v1.0.7 available — release notes below.")
 if hasattr(sv, "_update_notes_box"):
-    sv._update_notes_box.setText(notes)
-notes_visible = bool(sv._update_notes_box.text())
-checks.append(("Release notes shown inline", notes_visible and notes in sv._update_notes_box.text()))
+    sv._update_notes_box.setMarkdown(notes)
+notes_visible = bool(sv._update_notes_box.toPlainText())
+checks.append(("Release notes shown inline",
+               notes_visible and "new shader presets" in sv._update_notes_box.toPlainText()))
 
 for name, ok in checks:
     print(("[PASS] " if ok else "[FAIL] ") + name, flush=True)

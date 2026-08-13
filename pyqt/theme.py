@@ -558,6 +558,23 @@ QLabel[cls="toast"] {{
     padding: 9px 12px;
     font-size: 12px;
 }}
+QFrame[cls="toast-frame"] {{
+    background: {HOVER2};
+    border: 1px solid {BORDER2};
+    border-radius: {R_MD}px;
+}}
+QLabel[cls="toast-title"] {{
+    font-size: 13px;
+    font-weight: 700;
+    color: {TEXT};
+}}
+QTextEdit[cls="toast-notes"] {{
+    background: transparent;
+    border: none;
+    color: {TEXT2};
+    font-size: 12px;
+    selection-background-color: {GREEN_GLOW};
+}}
 
 /* Pill (chip / tab) */
 QPushButton[cls="pill"] {{

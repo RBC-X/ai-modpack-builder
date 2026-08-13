@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout,
                              QLabel, QLineEdit, QPlainTextEdit, QScrollArea,
-                             QSizePolicy, QSlider, QVBoxLayout, QWidget)
+                             QSizePolicy, QSlider, QTextEdit, QVBoxLayout, QWidget)
 
 import theme
 import minecraft_auth
@@ -785,9 +785,18 @@ class SettingsView(QWidget):
         self._panel_lay.addWidget(check)
         self._update_status = label(self._panel, "", "sub")
         self._panel_lay.addWidget(self._update_status)
-        self._update_notes_box = label(self._panel, "", "muted")
-        self._update_notes_box.setWordWrap(True)
+        # Release notes render as markdown (headings, bullets) before install.
+        self._update_notes_box = QTextEdit(self._panel)
+        self._update_notes_box.setReadOnly(True)
+        self._update_notes_box.setFrameShape(QFrame.Shape.NoFrame)
+        self._update_notes_box.setFixedHeight(210)
+        self._update_notes_box.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._update_notes_box.setStyleSheet(
+            f"QTextEdit {{ background: {theme.BG}; border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.R_MD}px; padding: 8px; color: {theme.TEXT2}; "
+            f"font-size: 12px; selection-background-color: {theme.GREEN_GLOW}; }}")
         self._panel_lay.addWidget(self._update_notes_box)
+        self._update_notes_box.hide()
 
         # Rollback: every applied update leaves its installer in the per-user
         # updates pool, so the previous version is always restorable offline.
@@ -848,9 +857,8 @@ class SettingsView(QWidget):
             self._render_update_result(
                 True, f"Update v{res.get('latest')} available — release notes below.")
             if notes and hasattr(self, "_update_notes_box"):
-                self._update_notes_box.setText(notes)
-                self._update_notes_box.setProperty("cls", "mono")
-                theme.polish(self._update_notes_box)
+                self._update_notes_box.setMarkdown(notes)
+                self._update_notes_box.show()
             btn = button(self._panel, f"⬇ DOWNLOAD & INSTALL v{res.get('latest')}",
                          "btn-primary", "download", theme.BG)
             btn.clicked.connect(self._confirm_update)
@@ -910,9 +918,10 @@ class SettingsView(QWidget):
             "is SHA-256 verified before it runs.",
             "muted",
         ))
-        notes_box = QPlainTextEdit(d)
+        notes_box = QTextEdit(d)
         notes_box.setReadOnly(True)
-        notes_box.setPlainText(notes or "(the update feed did not include release notes)")
+        notes_box.setFrameShape(QFrame.Shape.NoFrame)
+        notes_box.setMarkdown(notes or "_(the update feed did not include release notes)_")
         notes_box.setMinimumHeight(180)
         lay.addWidget(notes_box, 1)
         row = QHBoxLayout()

@@ -18,7 +18,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import PyQt6  # noqa: F401
-from PyQt6.QtWidgets import QApplication, QDialog, QPlainTextEdit, QPushButton
+from PyQt6.QtWidgets import QApplication, QDialog, QPushButton, QTextEdit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -34,9 +34,13 @@ URL = "https://example.com/update.json"
 report: list = []
 
 
+def _ascii(s: str) -> str:
+    return s.encode("ascii", "replace").decode("ascii")
+
+
 def check(name: str, ok: bool, detail: str = "") -> None:
     report.append({"name": name, "status": "PASS" if ok else "FAIL", "detail": detail})
-    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""), flush=True)
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" — {_ascii(detail)}" if detail else ""), flush=True)
 
 
 app = QApplication(sys.argv)
@@ -76,6 +80,13 @@ for _ in range(250):  # worker thread -> main thread callback
     time.sleep(0.02)
 check("download button shown after check", btn is not None)
 
+# ---- release notes render as markdown in the panel itself
+notes_box = getattr(view, "_update_notes_box", None)
+panel_rendered = (notes_box is not None and isinstance(notes_box, QTextEdit)
+                  and "Fixed the Project Atmosphere crash on startup" in notes_box.toPlainText())
+check("panel renders release notes as markdown", bool(panel_rendered),
+      f"type={type(notes_box).__name__} chars={len(notes_box.toPlainText()) if notes_box else 0}")
+
 # ---- confirm path: dialog shows full notes, clicking install applies
 class FakeDialog(QDialog):
     captured = None
@@ -97,8 +108,9 @@ FakeDialog.captured = None
 view._confirm_update()
 d = FakeDialog.captured
 check("release-notes dialog opened", d is not None)
-texts = [w.toPlainText() for w in d.findChildren(QPlainTextEdit)] if d else []
-check("full release notes shown in dialog", any(NOTES in t for t in texts),
+texts = [w.toPlainText() for w in d.findChildren(QTextEdit)] if d else []
+check("full release notes shown in dialog",
+      any("Fixed the Project Atmosphere crash on startup" in t for t in texts),
       f"box chars={max((len(t) for t in texts), default=0)}")
 dlg_go = [b for b in d.findChildren(QPushButton) if "DOWNLOAD & INSTALL" in b.text()] if d else []
 check("dialog has install button", len(dlg_go) == 1)

@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-08-12 — 1.0.11: release notes in the update toast + stale-launch-state fix
+
+- **Release notes before apply, everywhere.** The update toast is no longer a
+  one-line “install it in Settings” hint: when an update is available it now
+  renders a rich card with the version, the feed’s release notes as real
+  markdown (headings, bullets), and a **REVIEW & INSTALL** action that jumps
+  to Settings → Updates where the notes and the install confirmation live.
+  Settings → Updates itself now renders the notes in a markdown view, and the
+  confirm dialog shows the full rendered notes before anything downloads.
+- **Stale launch state can no longer fake “running”.** A persisted launch
+  record claiming the game is active without a live pid (left behind by a
+  crash or a hard kill) made the launcher report the pack as running forever.
+  `play_state` now degrades pid-less active records to stopped once stale,
+  and the age math is fixed to parse UTC timestamps correctly (the old
+  `mktime` path computed negative ages on non-UTC machines, silently keeping
+  the bug alive). Tested: `launch_state_test.py`.
+- **Installed-app verification**: the two randoo packs in the installed
+  1.0.10 workspace render as full Library cards (artwork + PLAY), and a real
+  play through the UI reached the main menu (~92 s, Sound engine + atlas
+  lines in the fresh boot log) with STOP verified — harness
+  `verify_installed_library.py`.
+- **Tests**: `update_toast_test.py` (toast render/action/auto-check wiring),
+  updated `updatenotes_ui_test.py` + `rollback_ui_test.py` for the markdown
+  notes box. Fast suites all green (health 150, identity 33, identity-ui,
+  smoke, embedded key, CF sort, rollback, auto-check toggle).
+
 ## 2026-08-12 — Starter concepts + Surprise Me + Pack Health dashboard
 
 - **Starter experiences on Home** (`engine/concepts.py`): six curated,

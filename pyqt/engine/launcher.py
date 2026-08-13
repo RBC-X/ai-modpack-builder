@@ -153,14 +153,28 @@ def play_state(build_id: str, build_dir: str):
         if not pid_alive(st["pid"]):
             st = {**st, "phase": "stopped", "stage": "Game closed", "error": None,
                   "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-    if st and st.get("pid") is None and st.get("phase") in ("preparing", "installing"):
-        try:
-            age = time.time() * 1000 - time.mktime(time.strptime(st["updatedAt"][:19], "%Y-%m-%dT%H:%M:%S")) * 1000
-        except Exception:
-            age = 0
-        if age > 10 * 60 * 1000:
-            st = {**st, "phase": "stopped", "stage": "Launch aborted (server restart)",
-                  "error": None, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    # A persisted state that claims the game is active but carries no live pid
+    # is stale garbage: the launcher that wrote it is gone, and a game cannot be
+    # running without a process. Without this guard the UI could report "running"
+    # forever after a crash that left a pid-less running record behind.
+    if st and st.get("phase") in ("running", "loading", "preparing", "installing"):
+        live_pid = isinstance(st.get("pid"), int) and st["pid"] > 0 and pid_alive(st["pid"])
+        if not live_pid:
+            try:
+                # updatedAt is written with time.gmtime (UTC) — time.mktime
+                # would interpret it as LOCAL time and compute a wrong (often
+                # negative) age on non-UTC machines, silently keeping stale
+                # records "running" forever. calendar.timegm is the UTC parse.
+                import calendar
+                age = time.time() * 1000 - calendar.timegm(time.strptime(st["updatedAt"][:19], "%Y-%m-%dT%H:%M:%S")) * 1000
+            except Exception:
+                age = 0
+            # Freshly-written states may legitimately lack a pid for a moment
+            # (written before the spawned pid was attached), so only treat
+            # pid-less records as dead once they are clearly stale.
+            if age > 2 * 60 * 1000:
+                st = {**st, "phase": "stopped", "stage": "Game closed (stale launch state)",
+                      "error": None, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     return st
 
 

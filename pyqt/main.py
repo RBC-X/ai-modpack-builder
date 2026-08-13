@@ -17,7 +17,7 @@ from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel,
                              QMainWindow, QMessageBox, QPushButton, QStackedWidget,
-                             QSizeGrip, QVBoxLayout, QWidget)
+                             QSizeGrip, QTextEdit, QVBoxLayout, QWidget)
 
 import theme
 import minecraft_auth
@@ -152,6 +152,33 @@ class MainWindow(QMainWindow):
         self._toast.setMaximumWidth(560)
         self._toast.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._toast.hide()
+        # Rich update toast: title + markdown-rendered release notes + action.
+        # Interactive (no WA_TransparentForMouseEvents) so Review works.
+        self._update_toast_serial = 0
+        self._update_toast = QFrame(self.centralWidget())
+        self._update_toast.setProperty("cls", "toast-frame")
+        self._update_toast.setMaximumWidth(560)
+        theme.polish(self._update_toast)
+        utl = vbox(self._update_toast, 8, margins=(14, 12, 14, 12))
+        self._update_toast_title = label(self._update_toast, "", "toast-title")
+        utl.addWidget(self._update_toast_title)
+        self._update_toast_notes = QTextEdit(self._update_toast)
+        self._update_toast_notes.setProperty("cls", "toast-notes")
+        self._update_toast_notes.setReadOnly(True)
+        self._update_toast_notes.setFrameShape(QFrame.Shape.NoFrame)
+        self._update_toast_notes.setFixedHeight(150)
+        self._update_toast_notes.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        theme.polish(self._update_toast_notes)
+        utl.addWidget(self._update_toast_notes)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        self._update_toast_later = button(self._update_toast, "Later", "btn-dark")
+        self._update_toast_later.clicked.connect(self._update_toast.hide)
+        btn_row.addWidget(self._update_toast_later)
+        self._update_toast_btn = button(self._update_toast, "REVIEW & INSTALL", "btn-primary", "download", theme.BG)
+        btn_row.addWidget(self._update_toast_btn)
+        utl.addLayout(btn_row)
+        self._update_toast.hide()
         self._resize_grip = QSizeGrip(self.centralWidget())
         self._resize_grip.setFixedSize(14, 14)
         self._resize_grip.setStyleSheet("background: transparent; border: none;")
@@ -178,6 +205,39 @@ class MainWindow(QMainWindow):
         x = max(16, self.centralWidget().width() - self._toast.width() - 24)
         y = max(58, self.centralWidget().height() - self._toast.height() - 24)
         self._toast.move(x, y)
+
+    def _place_update_toast(self) -> None:
+        if not hasattr(self, "_update_toast"):
+            return
+        self._update_toast.adjustSize()
+        x = max(16, self.centralWidget().width() - self._update_toast.width() - 24)
+        y = max(58, self.centralWidget().height() - self._update_toast.height() - 24)
+        self._update_toast.move(x, y)
+
+    def toast_update(self, latest: str, notes: str, on_action=None) -> None:
+        """Rich update toast: rendered release notes + a Review & install action.
+
+        The action routes into Settings → Updates (which re-runs the check and
+        shows the notes plus the install dialog) — so users always see the
+        release notes before anything is applied.
+        """
+        self._update_toast_serial += 1
+        self._update_toast_title.setText(f"Update v{latest} available")
+        body = str(notes or "").strip()
+        self._update_toast_notes.setMarkdown(body or "_The update feed did not include release notes._")
+        try:
+            self._update_toast_btn.clicked.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        if on_action is not None:
+            def go():
+                self._update_toast.hide()
+                on_action()
+            self._update_toast_btn.clicked.connect(go)
+        self._update_toast_btn.setVisible(on_action is not None)
+        self._place_update_toast()
+        self._update_toast.show()
+        self._update_toast.raise_()
 
     def _place_resize_grip(self) -> None:
         if not hasattr(self, "_resize_grip"):
@@ -221,12 +281,11 @@ class MainWindow(QMainWindow):
 
         def ok(res):
             if res.get("available"):
-                notes = (res.get("notes") or "").strip()
-                first = notes.splitlines()[0][:140] if notes else ""
-                msg = f"Update {res.get('latest')} available — install it in Settings → Updates."
-                if first:
-                    msg = f"Update {res.get('latest')} available: {first}… Install in Settings → Updates."
-                self.toast(msg, 9000)
+                # Rich release-notes toast: title + rendered notes + a Review
+                # action that lands in Settings → Updates (notes shown, install
+                # confirmed from there). The plain-text one-liner toast is gone.
+                self.toast_update(res.get("latest") or "?",
+                                  res.get("notes") or "", self._manual_update_check)
 
         run_async(work, ok, lambda e: None)
 
@@ -1585,6 +1644,7 @@ class MainWindow(QMainWindow):
         self.import_overlay._reposition(self.width(), self.height())
         self.crash_drawer._reposition(self.width(), self.height())
         self._place_toast()
+        self._place_update_toast()
         self._place_resize_grip()
 
 
