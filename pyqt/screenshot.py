@@ -115,6 +115,21 @@ win.launch_overlay.apply_status({"phase": "preparing", "progress": 42, "stage": 
 win.launch_overlay._reposition(1320, 840)
 snap(app, win, "12-launch-overlay")
 
+# Release-notes update toast (1.0.11): title + rendered markdown notes + the
+# Review & install action users see before an update applies.
+win.launch_overlay.hide()
+win.toast_update(
+    "1.0.11",
+    "## What's new in 1.0.11\n\n"
+    "- Release notes now render in the update toast before you install\n"
+    "- Settings → Updates shows the full changelog as markdown\n"
+    "- A stale launch record can no longer keep a pack running after a crash",
+    on_action=lambda: None)
+for _ in range(8):
+    app.processEvents()
+    time.sleep(0.05)
+snap(app, win, "13-update-toast")
+
 print("done — launcher screenshots refreshed in pyqt/screenshots/")
 win.packdetail._stop_log_stream()
 win.close()
