@@ -127,10 +127,12 @@ class MainWindow(QMainWindow):
         self.aibuilder = AIBuilderView(api)
         self.downloads = DownloadsView(api)
         self.activity = ActivityView(api)
-        self.settings = SettingsView(api)
+        # Settings is a floating overlay, not a stack page: it lays on top of
+        # whichever page is underneath (see _set_nav / show_overlay).
+        self.settings = SettingsView(api, self)
         self.packdetail = PackDetailView(api)
         for w in (self.home, self.library, self.discover, self.aibuilder,
-                  self.downloads, self.activity, self.settings, self.packdetail):
+                  self.downloads, self.activity, self.packdetail):
             self.stack.addWidget(w)
         rl.addWidget(self.stack, 1)
         root.addWidget(right, 1)
@@ -656,12 +658,21 @@ class MainWindow(QMainWindow):
         self.import_overlay.play_requested.connect(self.play)
         self.crash_drawer.close_requested.connect(self.crash_drawer.hide)
         self.crash_drawer.fix_requested.connect(self.fix_missing)
+        self.settings.close_requested.connect(self._close_settings)
         self.account_modal.finished.connect(lambda _r: self._refresh_account_block())
         self.account_modal.account_changed.connect(self._refresh_account_block)
 
     def _open_provider_settings(self) -> None:
         self._set_nav("settings")
         self.settings.open_section("providers")
+
+    def _close_settings(self) -> None:
+        """Close the settings overlay and return to the page it covered."""
+        self.settings.hide()
+        nav = getattr(self, "_settings_return_nav", None) or "home"
+        if nav == "settings":
+            nav = "home"
+        self._set_nav(nav)
 
     def _timers(self) -> None:
         self._poll = QTimer(self)
@@ -1029,6 +1040,8 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _set_nav(self, nav: str) -> None:
+        if nav == "settings":
+            self._settings_return_nav = self.active_nav
         self.active_nav = nav
         self._open_detail(None)
         icon_by_id = {nid: nicon for nid, _nlabel, nicon in NAV}
@@ -1043,10 +1056,16 @@ class MainWindow(QMainWindow):
             ic.setPixmap(icon_pixmap(icon_by_id[nid], theme.GREEN if active else theme.MUTED, 16))
             nav_label.setProperty("cls", "nav-label-active" if active else "nav-label")
             theme.polish(nav_label)
-        self._title.setText(TITLES.get(nav, nav.title()))
-        self.stack.setCurrentWidget(getattr(self, ATTR_BY_NAV[nav]))
-        if nav in ("downloads", "activity", "settings"):
-            getattr(self, ATTR_BY_NAV[nav]).showEvent(None)
+        if nav != "settings":
+            self._title.setText(TITLES.get(nav, nav.title()))
+        if nav == "settings":
+            # Floating surface on top of the current page — the stack keeps
+            # showing whatever was underneath.
+            self.settings.show_overlay()
+        else:
+            self.stack.setCurrentWidget(getattr(self, ATTR_BY_NAV[nav]))
+            if nav in ("downloads", "activity"):
+                getattr(self, ATTR_BY_NAV[nav]).showEvent(None)
         # Packs must be current the moment the user looks: Home and Library
         # re-read the engine's on-disk index on arrival (async, non-blocking)
         # instead of waiting up to 20 s for the background refresh timer.
@@ -1058,6 +1077,8 @@ class MainWindow(QMainWindow):
 
     def _open_detail(self, build_id: str | None) -> None:
         self.detail_pack_id = build_id
+        if self.settings.isVisible():
+            self.settings.hide()
         if build_id:
             self._title.setText("Pack Management")
             self.stack.setCurrentWidget(self.packdetail)
@@ -1643,6 +1664,7 @@ class MainWindow(QMainWindow):
         self.launch_overlay._reposition(self.width(), self.height())
         self.import_overlay._reposition(self.width(), self.height())
         self.crash_drawer._reposition(self.width(), self.height())
+        self.settings._reposition(self.width(), self.height())
         self._place_toast()
         self._place_update_toast()
         self._place_resize_grip()

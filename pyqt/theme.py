@@ -661,6 +661,22 @@ QPushButton[cls="settings-nav"][active="true"] {{
     color: {TEXT};
     border: 1px solid {BORDER};
 }}
+QPushButton[cls="settings-nav-top"] {{
+    background: transparent;
+    color: {TEXT2};
+    border: 1px solid transparent;
+    border-radius: {R_MD}px;
+    padding: 8px 14px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton[cls="settings-nav-top"]:hover {{ background: {HOVER}; color: {TEXT}; }}
+QPushButton[cls="settings-nav-top"][active="true"] {{
+    background: {GREEN_GLOW};
+    color: {GREEN};
+    border: 1px solid rgba(57,184,106,0.35);
+}}
 
 /* Inputs */
 QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {{

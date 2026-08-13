@@ -73,7 +73,7 @@ jobs:
             06-pack-settings 07-discover 07b-discover-details 08-ai-builder \
             09-downloads 10-activity 11-settings 11b-provider-settings \
             11c-account-settings 11d-account-dialog 12-launch-overlay \
-            13-update-toast; do
+            13-update-toast 14-settings-updates; do
             cp "pyqt/screenshots/$f.png" "screenshots/$f.png"
           done
           git add screenshots

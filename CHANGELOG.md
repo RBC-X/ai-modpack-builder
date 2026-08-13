@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-12 — Settings as a floating overlay + Settings → Updates gallery shot
+
+- **Settings is no longer a sidebar within a sidebar.** The Settings page is
+  now a floating overlay that lays on top of the app: a translucent scrim,
+  a centered panel, and a top section nav (General · Appearance · Minecraft ·
+  Java · Providers · AI · Account · Cloud · Updates) with a close button.
+  The page underneath stays visible, navigating away closes it, and closing
+  returns to the page it covered. All entry points (sidebar, Ctrl+K palette,
+  Discover's provider shortcut, check-for-updates, re-detect hardware) open
+  the same overlay. Tests: `settings_overlay_test.py` (9 checks).
+- **Settings → Updates gallery shot.** `14-settings-updates.png` renders the
+  Updates panel with the feed's real release notes (markdown) and the install
+  action visible; the CI screenshot gallery and README carry it.
+
 ## 2026-08-12 — 1.0.11: release notes in the update toast + stale-launch-state fix
 
 - **Release notes before apply, everywhere.** The update toast is no longer a

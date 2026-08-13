@@ -5,7 +5,7 @@ import json
 import os
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout,
                              QLabel, QLineEdit, QPlainTextEdit, QScrollArea,
                              QSizePolicy, QSlider, QTextEdit, QVBoxLayout, QWidget)
@@ -14,7 +14,7 @@ import theme
 import minecraft_auth
 import updater
 from common import (button, card, clear_layout, fmt_bytes, fmt_time, hbox,
-                    icon_pixmap, label, pill, progress, run_async, vbox)
+                    icon_btn, icon_pixmap, label, pill, progress, run_async, vbox)
 from icons import icon
 from product_config import APP_VERSION
 
@@ -491,78 +491,134 @@ def _save_state(st: dict) -> None:
         pass
 
 
-class SettingsView(QWidget):
+# Section ids: (id, short label shown in the top nav, tooltip, icon)
+NAV_SPECS = [
+    ("general", "General", "Launcher behavior", "settings"),
+    ("appearance", "Appearance", "Theme and sidebar density", "eye"),
+    ("minecraft", "Minecraft", "Game version and memory", "globe"),
+    ("java", "Java", "Java runtime management", "cpu"),
+    ("providers", "Providers", "API provider keys and sources", "key"),
+    ("ai", "AI", "AI engine and build behavior", "sparkles"),
+    ("account", "Account", "Microsoft account and offline profile", "user"),
+    ("cloud", "Cloud", "Cloud sync and backups", "cloud"),
+    ("updates", "Updates", "Update feed and release notes", "refresh"),
+]
+
+
+class SettingsView(QFrame):
+    """Launcher Settings as a floating surface that lays on top of the app.
+
+    With a parent (the main window) it renders as a full-window overlay: a
+    translucent scrim, a centered panel, a top section nav and a close
+    button — the current page stays underneath. Without a parent (tests) it
+    renders the same chrome as a plain page.
+    """
     settings_changed = pyqtSignal(dict)
     manage_account_requested = pyqtSignal()
     theme_changed = pyqtSignal(str)        # 'dark' | 'light' | 'system'
     sidebar_changed = pyqtSignal(bool)     # compact flag
+    close_requested = pyqtSignal()
 
-    def __init__(self, api):
-        super().__init__()
+    def __init__(self, api, parent=None):
+        super().__init__(parent)
         self.api = api
         self._sub = "general"
         self._settings: dict = {}
         self._hardware: dict = {}
         self._save_status = None
+        self._overlay = parent is not None
+        if self._overlay:
+            self.hide()
 
-        outer = QScrollArea(self)
-        outer.setWidgetResizable(True)
-        outer.setFrameShape(QFrame.Shape.NoFrame)
-        outer.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body = QWidget()
-        body.setProperty("page", "true")
-        outer.setWidget(body)
-        self.root = vbox(body, 24, margins=(32, 32, 32, 30))
-        self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
-        settings_head = QWidget(body)
-        settings_head_lay = vbox(settings_head, 0, margins=0)
-        settings_head_lay.addWidget(label(settings_head, "Launcher Settings", "h1"))
-        settings_head_lay.addWidget(label(
-            settings_head,
-            "Engine behaviors, memory allocation, Java runtimes, and API providers.",
+        # Centered shell: header (title + close), top section nav, content.
+        self._shell = QFrame(self)
+        self._shell.setProperty("cls", "panel")
+        self._shell.setFixedWidth(1000)
+        theme.polish(self._shell)
+        shell = vbox(self._shell, 0, margins=(28, 24, 28, 24))
+
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        head_col = vbox(self._shell, 0, margins=0)
+        head_col.addWidget(label(self._shell, "Launcher Settings", "h1"))
+        head_col.addWidget(label(
+            self._shell,
+            "Engine behaviors, memory, Java runtimes, providers, and updates — "
+            "changes apply instantly.",
             "small",
         ))
-        self.root.addWidget(settings_head)
+        head.addLayout(head_col, 1)
+        x = icon_btn(self._shell, "x", "Close settings")
+        x.clicked.connect(self.close_requested.emit)
+        head.addWidget(x)
+        shell.addLayout(head)
+        shell.addSpacing(14)
 
-        row = QHBoxLayout()
-        row.setSpacing(24)
-        nav = QVBoxLayout()
-        nav.setSpacing(4)
-        nav.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Top section nav (two wrapped rows) instead of a sidebar within a
+        # sidebar — the sections read as tabs across the surface.
         self._nav_btns: dict[str, object] = {}
-        nav_specs = [("general", "General", "settings"), ("appearance", "Appearance", "eye"),
-                     ("minecraft", "Minecraft", "globe"),
-                     ("java", "Java Runtime", "cpu"), ("providers", "API Providers", "key"),
-                     ("ai", "AI Engine", "sparkles"), ("account", "Account", "user"),
-                     ("cloud", "Cloud Sync", "cloud"), ("updates", "Updates", "refresh")]
-        for tid, tl, icon_name in nav_specs:
-            b = pill(body, tl, active=tid == self._sub, cls="settings-nav")
-            b.setIcon(icon(icon_name, theme.GREEN if tid == self._sub else theme.MUTED))
-            b.clicked.connect(lambda _=False, t=tid: self._set_sub(t))
-            b.setFixedWidth(240)
-            nav.addWidget(b)
-            self._nav_btns[tid] = b
-        row.addLayout(nav)
+        half = (len(NAV_SPECS) + 1) // 2
+        for row_specs in (NAV_SPECS[:half], NAV_SPECS[half:]):
+            nav_row = QHBoxLayout()
+            nav_row.setSpacing(6)
+            for tid, tl, tip, icon_name in row_specs:
+                b = pill(self._shell, tl, active=tid == self._sub, cls="settings-nav-top")
+                b.setToolTip(tip)
+                b.setIcon(icon(icon_name, theme.GREEN if tid == self._sub else theme.MUTED))
+                b.clicked.connect(lambda _=False, t=tid: self._set_sub(t))
+                nav_row.addWidget(b)
+                self._nav_btns[tid] = b
+            nav_row.addStretch(1)
+            shell.addLayout(nav_row)
+        shell.addSpacing(14)
 
-        # The settings panel fills the remaining column height (reference
-        # launchers render settings as a full-height surface, not a card that
-        # stops mid-window); the nav stays pinned at the top.
-        self._panel = card(body)
+        # Scrollable content panel; the active section renders into it.
+        self._panel_scroll = QScrollArea(self._shell)
+        self._panel_scroll.setWidgetResizable(True)
+        self._panel_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._panel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._panel_scroll.setMinimumHeight(420)
+        self._panel = card(self._shell)
         self._panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._panel_lay = vbox(self._panel, 14, margins=(24, 24, 24, 24))
         self._panel_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
-        row.addWidget(self._panel, 1)
-        self.root.addLayout(row, 1)
+        self._panel_scroll.setWidget(self._panel)
+        shell.addWidget(self._panel_scroll, 1)
 
         lay = vbox(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(outer)
+        lay.addWidget(self._shell, 0, Qt.AlignmentFlag.AlignCenter)
 
+    # -- overlay behavior --------------------------------------------------
+    def show_overlay(self) -> None:
+        """Open the settings surface on top of the current page."""
+        p = self.parentWidget()
+        if p is not None:
+            self.setGeometry(0, 0, p.width(), p.height())
+            # Keep the shell comfortably inside the window at any size.
+            self._shell.setMaximumHeight(max(320, p.height() - 64))
+        self.show()
+        self.raise_()
+        self._refresh()
+
+    def _reposition(self, w: int, h: int) -> None:
+        if self._overlay and self.isVisible():
+            self.setGeometry(0, 0, w, h)
+            self._shell.setMaximumHeight(max(320, h - 64))
+            self.raise_()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if self._overlay:
+            p = QPainter(self)
+            p.fillRect(self.rect(), QColor(8, 10, 14, 205))
+            p.end()
+        else:
+            super().paintEvent(event)
+
+    # -- nav ---------------------------------------------------------------
     def _set_sub(self, t: str) -> None:
         self._sub = t
-        icon_names = {"general": "settings", "appearance": "eye", "minecraft": "globe", "java": "cpu",
-                      "providers": "key", "ai": "sparkles", "account": "user",
-                      "cloud": "cloud", "updates": "refresh"}
+        icon_names = {tid: ic for tid, _l, _tip, ic in NAV_SPECS}
         for tid, b in self._nav_btns.items():
             b.setProperty("active", "true" if tid == t else "false")
             b.setIcon(icon(icon_names[tid], theme.GREEN if tid == t else theme.MUTED))
@@ -577,7 +633,9 @@ class SettingsView(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         if event is not None:
             super().showEvent(event)
+        self._refresh()
 
+    def _refresh(self) -> None:
         def fetch():
             return self.api.settings_get(), self.api.hardware()
 

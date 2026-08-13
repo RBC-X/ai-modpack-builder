@@ -108,6 +108,9 @@ account_path = os.path.join(OUT, "11d-account-dialog.png")
 win.account_modal.grab().save(account_path)
 print(f"  saved {account_path}")
 win.account_modal.close()
+# The settings overlay floats above the page — drop it before the
+# launch-overlay captures so those render on the plain page again.
+win.settings.hide()
 
 # Launch overlay with the real backend status fields (no game launched).
 win.launch_overlay.show_launch(win.builds[0].get("name") or "pack")
@@ -129,6 +132,40 @@ for _ in range(8):
     app.processEvents()
     time.sleep(0.05)
 snap(app, win, "13-update-toast")
+win._update_toast.hide()
+
+# Settings -> Updates panel with the feed's real release notes rendered
+# (markdown) and the install action visible before anything is applied.
+import updater  # noqa: E402
+real_run_update = updater.run_update
+
+
+def fake_run_update(url, apply=False, dest_dir=None, extra_dir=None):
+    return {"ok": True, "available": True, "current": "1.0.10", "latest": "1.0.11",
+            "notes": "## What's new in 1.0.11\n\n"
+                      "- Release notes now render in the update toast before you install\n"
+                      "- Settings → Updates shows the full changelog as markdown\n"
+                      "- A stale launch record can no longer keep a pack running after a crash\n"
+                      "- The library refreshes instantly when you return to it",
+            "installerUrl": "https://example.com/update.json",
+            "installerSha256": "abc", "applied": apply}
+
+
+updater.run_update = fake_run_update
+win._set_nav("settings")
+win.settings.open_section("updates")
+win.settings._update_url_box.setText("https://example.com/update.json")
+win.settings._do_update_check()
+wait(win, app, lambda: bool(win.settings._update_notes_box.toPlainText()), secs=8)
+# Scroll the notes + install action fully into view so the capture shows
+# the feed's release notes and the download button.
+vsb = win.settings._panel_scroll.verticalScrollBar()
+vsb.setValue(vsb.maximum())
+for _ in range(4):
+    app.processEvents()
+    time.sleep(0.05)
+snap(app, win, "14-settings-updates")
+updater.run_update = real_run_update
 
 print("done — launcher screenshots refreshed in pyqt/screenshots/")
 win.packdetail._stop_log_stream()
