@@ -127,12 +127,15 @@ win.launch_overlay.apply_status({"phase": "preparing", "progress": 42, "stage": 
 win.launch_overlay._reposition(1320, 840)
 snap(app, win, "12-launch-overlay")
 
-# Release-notes update toast (1.0.11): title + rendered markdown notes + the
-# Review & install action users see before an update applies.
+# Release-notes update toast: title + rendered markdown notes + the
+# Review & install action users see before an update applies. The version
+# comes from the real product config so the capture always matches the
+# release it ships with.
 win.launch_overlay.hide()
+from product_config import APP_VERSION  # noqa: E402
 win.toast_update(
-    "1.0.11",
-    "## What's new in 1.0.11\n\n"
+    APP_VERSION,
+    f"## What's new in {APP_VERSION}\n\n"
     "- Release notes now render in the update toast before you install\n"
     "- Settings → Updates shows the full changelog as markdown\n"
     "- A stale launch record can no longer keep a pack running after a crash",
@@ -150,8 +153,10 @@ real_run_update = updater.run_update
 
 
 def fake_run_update(url, apply=False, dest_dir=None, extra_dir=None):
-    return {"ok": True, "available": True, "current": "1.0.10", "latest": "1.0.11",
-            "notes": "## What's new in 1.0.11\n\n"
+    prev = ".".join(str(max(int(x) - 1, 0)) if i == 2 else x for i, x in
+                     enumerate(APP_VERSION.split(".")))
+    return {"ok": True, "available": True, "current": prev, "latest": APP_VERSION,
+            "notes": f"## What's new in {APP_VERSION}\n\n"
                       "- Release notes now render in the update toast before you install\n"
                       "- Settings → Updates shows the full changelog as markdown\n"
                       "- A stale launch record can no longer keep a pack running after a crash\n"

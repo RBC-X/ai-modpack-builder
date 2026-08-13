@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-13 — 1.0.13: Library square tiles + modpack artwork + fresh screenshot gallery
+
+- **Library cards are now smaller, squarer tiles.** The grid switched from
+  three wide rectangles to an adaptive 4-up layout (~263×252, near-square)
+  that falls back to 3-up on narrow windows, with tighter body spacing and
+  a shorter banner band.
+- **Modpacks with artwork show it like CurseForge.** Each card's top band is
+  now the pack's own image (gallery screenshot preferred, project icon
+  otherwise) — fill-cropped to the banner with the status pill overlaid,
+  and the pack name below it. Imported packs keep their modpack project's
+  artwork (captured at import), AI-built packs use their flagship mod's
+  image, and packs with no image at all keep the existing gradient artwork
+  band with avatar + name exactly as before.
+- **New `box=` fill-crop support in the icon cache** so banner images scale
+  to the band instead of letterboxing; existing square-icon callers are
+  unchanged.
+- **Fresh screenshot gallery.** Every capture was re-rendered from scratch
+  for this release; the update-toast and Settings→Updates shots now carry
+  the real current version, and the stale launch-state shots are gone from
+  the README gallery.
+
 ## 2026-08-12 — Library: square tiles + modpack artwork in the grid
 
 - **Library cards are now smaller, squarer tiles.** The grid switched from
