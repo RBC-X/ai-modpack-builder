@@ -86,4 +86,4 @@ matrix). The literal old PNGs remain available in git history (`a5ed4f7`).
 - Microsoft sign-in, rollback-from-broken-update, and CurseForge key flows need their live
   credentials/endpoints; the embedded-key and provider tests cover the offline contract only.
 - CI's screenshot-regeneration workflow will push its own gallery after this push (bot commit) —
-  expected noise; the workflow is green and its author-guard prevents self-triggering loo
+  expected noise; the workflow is green and its author-guard prevents self-triggering loops.
