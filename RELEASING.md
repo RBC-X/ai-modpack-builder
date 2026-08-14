@@ -53,6 +53,27 @@ feed at `workspace/update-feed-https/update.json` (rewriting `installerUrl` to
 to the repo (e.g. `update.json` at the repo root, served by GitHub Pages or the
 release's `latest/download` URL).
 
+## One-shot release (`pyqt/release.py`)
+
+The whole clean-checkout build + publish flow is now ONE command, so the
+provenance rule is mechanical:
+
+```bash
+# 1. bump APP_VERSION in pyqt/product_config.py, write the CHANGELOG entry,
+#    commit, and push main — then:
+pyqt/.venv/Scripts/python pyqt/release.py
+```
+
+It reads `APP_VERSION`, requires a clean tree, ensures `v<ver>` is at HEAD
+(creating + pushing the tag if missing), builds the signed installer inside a
+throwaway `git worktree` of that exact tag, gates on Authenticode **Valid**,
+refreshes the screenshot gallery, publishes the release + `update.json` +
+gallery via `publish_release.py`, verifies the public feed serves the new
+version, and removes the worktree. `--dry-run` validates the plumbing without
+building; `--no-publish` stops after the verified build; `--force-tag` is the
+only way to re-point an existing tag (use it to correct a wrong tag, never to
+ship).
+
 ## Release provenance (source-of-truth rule)
 
 A release's Git tag MUST point at the exact commit that produced its
