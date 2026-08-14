@@ -44,6 +44,7 @@ Flags:  --repo OWNER/REPO   (default RBC-X/ai-modpack-builder)
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -203,7 +204,78 @@ def _guard(version: str) -> int:
         return 1
     log(f"[guard] PASS - tag {tag} -> {tag_rev[:10]}, source APP_VERSION "
         f"{version!r}, ancestor of HEAD ({head[:10]})")
+    # Gallery provenance: the release page's screenshots must be byte-for-byte
+    # the ones committed at the tag (the 13-update-toast/14-settings-updates
+    # drift class - a non-deterministic render racing the CI bot's
+    # regeneration produced released assets that did not match the tag).
+    ok, detail = _guard_gallery(tag)
+    if not ok:
+        log(f"[guard] FAIL - release {tag} gallery drifts from its tag: {detail}")
+        return 1
+    log(f"[guard] gallery check - {detail}")
     return 0
+
+
+def _guard_gallery(tag: str) -> tuple[bool, str]:
+    """Release gallery assets must match the screenshots committed at the tag.
+
+    Each committed screenshots/*.png at the tag's commit is hashed straight
+    from its git blob (binary-safe) and compared against the release's
+    uploaded asset digests reported by `gh release view` - no downloads, and
+    no extra CI token scope beyond the existing contents: read.
+
+    Returns (ok, detail). The check is skipped (ok=True) when gh is
+    unavailable or the release has not been published yet: the tag-push guard
+    run legitimately fires BEFORE release.py publishes, so a missing release
+    there is normal, not drift.
+    """
+    try:
+        tag_rev = _git_out("rev-parse", f"{tag}^{{}}")
+    except RuntimeError:
+        return True, f"tag {tag} missing - nothing to verify"
+    committed: dict[str, str] = {}
+    ls = _git("ls-tree", "-r", tag_rev, "screenshots")
+    if ls.returncode != 0:
+        return False, "could not list screenshots at the tag"
+    for line in (ls.stdout or "").splitlines():
+        meta, path = line.split("\t", 1)
+        if not path.endswith(".png"):
+            continue
+        blob = meta.split()[2]
+        data = subprocess.run(["git", "cat-file", "blob", blob],
+                              capture_output=True).stdout
+        committed[path.removeprefix("screenshots/")] = \
+            hashlib.sha256(data).hexdigest()
+    if not committed:
+        return True, "no screenshots committed at the tag - nothing to verify"
+    gh = subprocess.run(["gh", "release", "view", tag, "--json", "assets",
+                         "--jq", "[.assets[] | {name, digest}]"],
+                        capture_output=True, text=True)
+    if gh.returncode != 0 or not gh.stdout.strip():
+        return True, (f"SKIP - release {tag} not published yet or gh "
+                      f"unavailable ({gh.stderr.strip()[:80]})")
+    released: dict[str, str] = {}
+    try:
+        items = json.loads(gh.stdout)
+    except json.JSONDecodeError:
+        return False, f"could not parse gh asset list for {tag}"
+    for item in items:
+        name = str(item.get("name") or "")
+        if not name.endswith(".png"):
+            continue
+        released[name] = str(item.get("digest") or "").replace("sha256:", "")
+    bad: list[str] = []
+    for name, h in sorted(committed.items()):
+        if name not in released:
+            bad.append(f"{name} missing from release assets")
+        elif released[name] != h:
+            bad.append(f"{name} drifts ({released[name][:10]} vs {h[:10]})")
+    for name in sorted(released):
+        if name not in committed:
+            bad.append(f"{name} on release but not committed at the tag")
+    if bad:
+        return False, "; ".join(bad)
+    return True, f"{len(committed)} gallery assets match the tag's committed screenshots"
 
 
 def main() -> int:

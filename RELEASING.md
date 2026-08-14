@@ -107,6 +107,20 @@ To verify any release: `git rev-parse vX.Y.Z^{} ` must match the commit whose
 working tree built the installer, and `pyqt/product_config.py` in that commit
 must print the same `APP_VERSION` the installer reports.
 
+## Gallery provenance (release assets vs committed screenshots)
+
+- `release.py --guard` additionally verifies that every gallery PNG on the
+  release page is byte-for-byte the `screenshots/*.png` committed at the
+  release tag (asset `digest` from `gh release view` vs the tag's git blobs —
+  no downloads, no extra token scope). This catches the non-deterministic
+  toast-render drift class (13-update-toast / 14-settings-updates) where a
+  render racing the CI screenshot bot produced released assets that did not
+  match the tag. A missing release (tag pushed before publish) is skipped,
+  not failed.
+- Gallery assets on a release page should be refreshed with the current
+  committed set when the README gallery moves on:
+  `gh release upload vX.Y.Z screenshots/*.png --clobber`.
+
 ## Point the launcher at the public feed
 
 - In the app: **Settings → Updates → Update feed URL** → paste
