@@ -32,4 +32,8 @@ jobs:
           python-version: "3.11"
 
       - name: Release preflight guard
+        # gh needs GH_TOKEN to read release asset digests for the gallery
+        # provenance check; the auto-provided github.token has contents: read.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python pyqt/release.py --guard
