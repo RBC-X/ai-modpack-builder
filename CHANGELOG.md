@@ -1,4 +1,12 @@
 # Changelog
+## 2026-08-14 — 1.0.26: release-pipeline verification round
+
+- **One-shot release exercised end-to-end again.** No product code changed
+  since 1.0.25; this release proves the `release.py` flow (tag at HEAD →
+  clean-checkout build → signed installer → gallery → publish → feed
+  verify → tag reconciliation) is repeatable, and that the auto-update path
+  cleanly reports `available: False` once the installed app is current.
+
 ## 2026-08-14 — 1.0.25: self-healing releases + resilient auto-update
 
 - **Releases can no longer be blocked or orphaned by the CI screenshot bot.**
