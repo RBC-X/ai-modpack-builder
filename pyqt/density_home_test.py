@@ -51,6 +51,17 @@ api = PyEngine()
 win = MainWindow(api)
 win.show()
 win.resize(1320, 840)
+
+# The Library loads builds asynchronously (refresh_builds on a worker); the
+# tile-geometry checks below need the real pack list, so wait for it to land
+# the same way smoke_test does instead of asserting against an empty grid.
+import time  # noqa: E402
+for _ in range(80):
+    app.processEvents()
+    if win.builds:
+        break
+    time.sleep(0.1)
+
 win._set_nav("library")
 for _ in range(20):
     app.processEvents()

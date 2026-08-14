@@ -7,7 +7,6 @@ Run:  pyqt/.venv/Scripts/python pyqt/browse_speed_test.py
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -17,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "engine"))
 
 from engine.service import PyEngine  # noqa: E402
-from engine.providers.http import _cache_root  # noqa: E402
+from engine.providers.http import _cache_root, clear_provider_cache  # noqa: E402
 
 report: dict = {"phases": []}
 COMBOS = [
@@ -34,9 +33,19 @@ def phase(name: str, ok: bool, detail: str) -> None:
 def main() -> int:
     e = PyEngine()
     # ---- 1. cold vs warm: wipe the provider cache, time the full set -------
-    cache_dir = Path(_cache_root)
-    if cache_dir.exists():
-        shutil.rmtree(cache_dir)
+    # Use the engine's own cache-clear API (memory + in-flight + disk). A bare
+    # shutil.rmtree was wrong twice: it raced transient Windows file locks
+    # (OneDrive/AV -> WinError 5) and it left the in-memory cache intact, so
+    # the "cold" measurement was partly memory-served. If anything on disk
+    # survives (a file still locked), retry briefly and stay transparent.
+    clear_provider_cache()
+    for _ in range(6):
+        if not Path(_cache_root).exists() or not any(Path(_cache_root).rglob("*")):
+            break
+        time.sleep(0.5)
+        clear_provider_cache()
+    if Path(_cache_root).exists() and any(Path(_cache_root).rglob("*")):
+        print("[WARN] provider cache not fully cleared — cold timing may include cached reads", flush=True)
 
     def run_all() -> dict:
         out = {}
@@ -71,11 +80,36 @@ def main() -> int:
     phase("all-sources merges real hits", len(r.get("hits") or []) >= 10,
           f"{len(r.get('hits') or [])} merged hits")
 
-    # ---- 3. worlds routing without a CF key ---------------------------------
+    # ---- 3. worlds routing: honest with and without a CF key ---------------
+    # The user now has a real key configured, so the live engine serves worlds
+    # from the CurseForge catalog; the no-key honesty contract is still pinned
+    # by simulating a keyless store (env/DPAPI/embedded all resolve empty).
     rw = e.search(q="", provider="all", mc="1.20.1", loader="all", type="world")
-    honest = "CurseForge API key" in str(rw.get("error") or "")
-    phase("worlds honest without CF key", honest and not (rw.get("hits") or []),
-          str(rw.get("error"))[:90])
+    if "CurseForge API key" in str(rw.get("error") or ""):
+        phase("worlds honest without CF key", not (rw.get("hits") or []),
+              str(rw.get("error"))[:90])
+    else:
+        phase("worlds served from CF catalog with key",
+              bool(rw.get("hits")) and not rw.get("error"),
+              f"hits={len(rw.get('hits') or [])} error={rw.get('error')}")
+
+    from engine.providers.settings import SettingsStore  # noqa: E402
+
+    class _KeylessStore(SettingsStore):
+        def curseforge_key(self) -> str:
+            return ""
+
+        def curseforge_key_source(self) -> str:
+            return "none"
+
+        def mtime(self) -> float:
+            return 0.0
+
+    ek = PyEngine(_KeylessStore())
+    rw0 = ek.search(q="", provider="all", mc="1.20.1", loader="all", type="world")
+    honest = "CurseForge API key" in str(rw0.get("error") or "")
+    phase("worlds honest without CF key", honest and not (rw0.get("hits") or []),
+          str(rw0.get("error"))[:90])
 
     report["overall"] = "PASS" if all(p["status"] == "PASS" for p in report["phases"]) else "FAIL"
     out = ROOT.parent / "workspace" / "browse-speed-result.json"

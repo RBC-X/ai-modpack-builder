@@ -73,8 +73,34 @@ check("modrinth full page reports more",
 r5 = eng.search(q="create", provider="curseforge", type="mod", offset=0, page_size=96)
 check("curseforge page_size clamps to its 50 cap", r5.get("page_size") == 50,
       f"page_size={r5.get('page_size')}")
-check("curseforge error path reports more=False", r5.get("more") is False,
-      f"more={r5.get('more')}")
+cf_total = int(r5.get("total") or 0)
+check("curseforge success path surfaces a real total", cf_total > len(r5.get("hits") or []),
+      f"total={cf_total} hits={len(r5.get('hits') or [])}")
+check("curseforge success path reports more=True on a full page",
+      r5.get("more") is (cf_total > 50), f"more={r5.get('more')} total={cf_total}")
+
+# The REAL error path: a provider outage must report more=False (Next
+# disabled) and surface the error — not an empty-page guess. The earlier
+# version of this check ran against a keyless CF that failed, so it only
+# ever saw the error branch; with the key configured the success branch
+# (more=True on a full page) is now the live path. Simulate the outage
+# directly on the provider so the error branch is genuinely exercised.
+from engine.providers.curseforge import CurseForgeProvider  # noqa: E402
+
+def _boom(opts):
+    raise RuntimeError("simulated CurseForge outage")
+
+eng2 = PyEngine()
+cf_prov = CurseForgeProvider("invalid-key-for-error-path-test")
+cf_prov.search_meta = _boom
+mr = next((p for p in eng2._cached_providers() if p.name == "modrinth"), None)
+eng2._providers = ([cf_prov, mr] if mr else [cf_prov])
+eng2._providers_stamp = eng2.settings_store.mtime()
+r5e = eng2.search(q="create", provider="curseforge", type="mod", offset=0)
+check("curseforge error path reports more=False", r5e.get("more") is False,
+      f"more={r5e.get('more')}")
+check("curseforge error path surfaces the real error", bool(r5e.get("error")),
+      f"error={r5e.get('error')}")
 
 r6 = eng.search(q="create", provider="all", type="mod", offset=0, page_size=96)
 check("merged page_size is the sum of per-source sizes",
