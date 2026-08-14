@@ -245,7 +245,8 @@ def main() -> int:
         phase("installer Authenticode", valid, "signature Valid")
         if not valid:
             return 1
-        dest = HERE / "installers" / installer_name
+        # publish_release.py reads ROOT/installers — copy there, not pyqt/.
+        dest = ROOT / "installers" / installer_name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(setup, dest)
         phase("installer copied to main checkout", dest.exists(), str(dest))
@@ -263,6 +264,16 @@ def main() -> int:
                 shutil.copyfile(p, ASSETS_DIR / p.name)
                 gallery += 1
             phase("gallery refresh", rc == 0 and gallery > 0, f"{gallery} shots")
+            # The gallery is a tracked release asset (README + Pages). Commit
+            # it so the tree never ends the release dirty and the publish is
+            # not blocked by the clean-tree precondition on a re-run.
+            dirty_gallery = _git("status", "--porcelain", "--", "screenshots")
+            if dirty_gallery.stdout.strip():
+                _git("add", "--", "screenshots")
+                r = _git("commit", "-m",
+                         f"chore: refresh screenshot gallery for the {version} renders")
+                phase("gallery committed", r.returncode == 0,
+                      f"{len(dirty_gallery.stdout.splitlines())} files")
 
         # ---- 8. Publish -------------------------------------------------------
         if no_publish:
