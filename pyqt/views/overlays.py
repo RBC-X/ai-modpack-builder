@@ -66,7 +66,7 @@ class LaunchOverlay(QFrame):
     stop_requested = pyqtSignal()
     view_crash = pyqtSignal()
 
-    def __init__(self, parent: QWidget):
+    def __init__(self, parent: QWidget, api=None):
         super().__init__(parent)
         self.setProperty("cls", "panel")
         theme.polish(self)
@@ -75,13 +75,21 @@ class LaunchOverlay(QFrame):
         self._status: dict = {}
         self._name = "pack"
         self._mode = "starting"
+        self._api = api
+        self._build_id: str | None = None
+        self._fit_label = None
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setInterval(4000)
+        self._fit_timer.timeout.connect(self._refresh_live_fit)
+        self._fit_timer.start()
 
         self._lay = vbox(self, 12, margins=(18, 14, 18, 14))
 
-    def show_launch(self, name: str) -> None:
+    def show_launch(self, name: str, build_id: str | None = None) -> None:
         self._name = name
         self._mode = "starting"
         self._status = {}
+        self._build_id = build_id
         self._render()
         self.show()
         self.raise_()
@@ -194,6 +202,15 @@ class LaunchOverlay(QFrame):
             mods = st.get("modsLoaded")
             total = st.get("modsTotal")
             self._lay.addWidget(label(self, f"Mods: {mods}/{total}" if mods and total else "Waiting for the game process…", "muted"))
+            # Live heap-fit field: re-runs the launch-time fit against the RAM
+            # free RIGHT NOW (requested → fitted, plus free GB) every 4 s while
+            # the launch is starting, so the user sees the exact heap the
+            # running launch picked — mirroring the Pack Detail badge.
+            self._fit_label = label(self, "", "muted")
+            self._fit_label.setWordWrap(True)
+            self._fit_label.setMaximumWidth(392)
+            self._lay.addWidget(self._fit_label)
+            self._refresh_live_fit()
             stop = button(self, "STOP", "btn-dark")
             stop.clicked.connect(self.stop_requested.emit)
             self._lay.addWidget(stop)
@@ -212,6 +229,40 @@ class LaunchOverlay(QFrame):
         if parent is not None:
             self._reposition(parent.width(), parent.height())
             self.raise_()
+
+    def _refresh_live_fit(self) -> None:
+        """Re-run the launch-time heap fit against live free RAM and update the
+        starting stage's label (requested → fitted, plus free GB). No-ops when
+        the overlay isn't in the starting stage or has no build to fit."""
+        if self._fit_label is None or self._mode != "starting":
+            return
+        try:
+            from engine.hardware import fit_xmx_mb, fit_xmx_to_free_mb
+            api = self._api
+            requested = None
+            if api is not None and self._build_id:
+                rec = api.build(self._build_id)
+                reqs = (rec or {}).get("requirements") or {}
+                perf = (rec or {}).get("perfEstimate") or {}
+                ram_gb = int(reqs.get("ramGB") or 0) or int(perf.get("recommendedAllocationMB", 0) // 1024 or 0) or 8
+                requested = fit_xmx_mb(ram_gb)
+            elif self._status.get("heapFit"):
+                # Fallback: the launch already stamped its chosen fit — surface
+                # it verbatim (repair / generic launches without a record).
+                self._fit_label.setText(self._status["heapFit"])
+                return
+            if requested is None:
+                self._fit_label.setText("")
+                return
+            free = float((api.free_ram() or {}).get("freeGb") or 0) if api is not None else 0
+            fitted = fit_xmx_to_free_mb(requested, free) if free else requested
+            if fitted < requested:
+                self._fit_label.setText(
+                    f"Heap fit to RAM: {requested} → {fitted} MB on this launch ({free:.1f} GB free)")
+            else:
+                self._fit_label.setText(f"Heap {requested} MB fits free RAM ({free:.1f} GB free)")
+        except Exception:
+            pass
 
     def _ic(self, name: str, color: str) -> QLabel:
         l = QLabel(self)

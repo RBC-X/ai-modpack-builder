@@ -37,9 +37,9 @@ Captured from the running app (offscreen render, real engine data, regenerated o
 | ![Home](screenshots/01-home.png) | ![Library](screenshots/02-library.png) | ![Pack overview](screenshots/03-pack-overview.png) | ![Pack content](screenshots/04-pack-content.png) |
 | ![Pack logs](screenshots/05-pack-logs.png) | ![Pack settings](screenshots/06-pack-settings.png) | ![Discover](screenshots/07-discover.png) | ![Discover details](screenshots/07b-discover-details.png) |
 | ![AI Builder](screenshots/08-ai-builder.png) | ![Downloads](screenshots/09-downloads.png) | ![Activity](screenshots/10-activity.png) | ![Settings](screenshots/11-settings.png) |
-| ![Provider settings](screenshots/11b-provider-settings.png) | ![Account settings](screenshots/11c-account-settings.png) | ![Account dialog](screenshots/11d-account-dialog.png) | ![Launch overlay](screenshots/12-launch-overlay.png) | ![Update toast](screenshots/13-update-toast.png) |
-| ![Appearance settings](screenshots/11e-appearance-settings.png) | ![Minecraft settings](screenshots/11f-minecraft-settings.png) | ![Java settings](screenshots/11g-java-settings.png) | ![AI settings](screenshots/11h-ai-settings.png) | ![Cloud settings](screenshots/11i-cloud-settings.png) |
-| ![Settings → Updates](screenshots/14-settings-updates.png) | | | | |
+| ![Provider settings](screenshots/11b-provider-settings.png) | ![Account settings](screenshots/11c-account-settings.png) | ![Account dialog](screenshots/11d-account-dialog.png) | ![Launch overlay](screenshots/12-launch-overlay.png) | ![Crash drawer](screenshots/12b-crash-drawer.png) |
+| ![Update toast](screenshots/13-update-toast.png) | ![Appearance settings](screenshots/11e-appearance-settings.png) | ![Minecraft settings](screenshots/11f-minecraft-settings.png) | ![Java settings](screenshots/11g-java-settings.png) | ![AI settings](screenshots/11h-ai-settings.png) |
+| ![Cloud settings](screenshots/11i-cloud-settings.png) | ![Settings → Updates](screenshots/14-settings-updates.png) | | | |
 
 ## What it does
 

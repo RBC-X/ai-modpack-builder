@@ -55,6 +55,27 @@ def create_instance_dir(build_dir, logger) -> dict:
     return dirs
 
 
+def _copy_if_changed(src, dst) -> bool:
+    """Copy src -> dst only when dst is missing or differs (size or mtime).
+
+    Every launch re-installs the pack's jars into the instance; unconditional
+    copies rewrote 2-3 GB and dirtied the Windows page cache right as the JVM
+    started growing, starving it on low-RAM boxes (the game's clean exit-0
+    with no crash report). copy2 preserves mtime so a repeat run sees matching
+    size + mtime and skips, and a re-downloaded jar (new mtime) is re-copied.
+    """
+    dst = Path(dst)
+    try:
+        s = Path(src).stat()
+        d = dst.stat()
+        if s.st_size == d.st_size and int(s.st_mtime) == int(d.st_mtime):
+            return False
+    except OSError:
+        pass
+    shutil.copy2(src, dst)
+    return True
+
+
 def install_mod_jars(mods_dir, jars: list, logger) -> int:
     mkdirp(mods_dir)
     copied = 0
@@ -67,8 +88,8 @@ def install_mod_jars(mods_dir, jars: list, logger) -> int:
         if name in seen:
             continue
         seen.add(name)
-        shutil.copyfile(jar["path"], Path(mods_dir) / name)
-        copied += 1
+        if _copy_if_changed(jar["path"], Path(mods_dir) / name):
+            copied += 1
     logger.info("instance", f"Installed {copied} mod jars into instance")
     return copied
 
@@ -79,8 +100,9 @@ def install_resource_packs(dir_, files: list, logger) -> int:
     for f in files:
         if not Path(f).exists():
             continue
-        shutil.copyfile(f, Path(dir_) / sanitize_filename(str(Path(f).name) or "pack.zip", "pack.zip"))
-        n += 1
+        dst = Path(dir_) / sanitize_filename(str(Path(f).name) or "pack.zip", "pack.zip")
+        if _copy_if_changed(f, dst):
+            n += 1
     if n:
         logger.info("instance", f"Installed {n} resource packs")
     return n
@@ -92,8 +114,9 @@ def install_shader_packs(dir_, files: list, logger) -> int:
     for f in files:
         if not Path(f).exists():
             continue
-        shutil.copyfile(f, Path(dir_) / sanitize_filename(str(Path(f).name) or "shader.zip", "shader.zip"))
-        n += 1
+        dst = Path(dir_) / sanitize_filename(str(Path(f).name) or "shader.zip", "shader.zip")
+        if _copy_if_changed(f, dst):
+            n += 1
     if n:
         logger.info("instance", f"Installed {n} shader packs")
     return n

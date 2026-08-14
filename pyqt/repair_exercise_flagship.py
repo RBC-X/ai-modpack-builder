@@ -14,6 +14,12 @@ import shutil
 import sys
 import time
 
+# Headless verification run: let the pack launch on a memory-constrained
+# box (the RAM guard's 1.0 GB threshold is for real users; the deep-tester
+# and repair exercises run under the same conditions as the passing deep
+# tests). The sub-3 GB warning still logs.
+os.environ["AMB_BYPASS_RAM_GUARD"] = "1"
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engine.bridge import PyEngine
 
@@ -45,26 +51,28 @@ def wait_menu(timeout=600):
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DL_MODS = os.path.join(ROOT, "workspace", "builds", bid, "downloads", "mods")
-backup_jar = None
 
 # 0. sanity
 rec = api.build(bid)
 check("flagship pack exists and passed", (rec.get("testResult") or {}).get("status") == "PASS")
-# geckolib's jar in the download store (launch re-installs from here, so the
-# instance copy alone would be silently restored)
-dl_jar = next((os.path.join(DL_MODS, f) for f in os.listdir(DL_MODS)
-               if f.lower().startswith("geckolib") and f.endswith(".jar")), None)
-check("geckolib jar present in download store", bool(dl_jar), dl_jar)
+# The launch re-installs mods from the download store, so the mod must be
+# removed from BOTH the store and the instance — and every version of it
+# (the store may hold 4.8.3 and 4.8.4; leaving one behind silently restores it).
+dl_jars = [os.path.join(DL_MODS, f) for f in os.listdir(DL_MODS)
+           if f.lower().startswith("geckolib") and f.endswith(".jar")]
+inst_jars = [os.path.join(MODS, f) for f in os.listdir(MODS)
+             if f.lower().startswith("geckolib") and f.endswith(".jar")]
+check("geckolib jars present in download store", bool(dl_jars), str(dl_jars))
 
-# 1. break the pack: remove geckolib from BOTH the download store and instance
+# 1. break the pack: remove every geckolib jar from both locations
 print("\n[REPAIR] Removing geckolib from the download store + instance…")
-backup_jar = dl_jar + ".bak"
-shutil.move(dl_jar, backup_jar)
-gecko_inst = next((os.path.join(MODS, f) for f in os.listdir(MODS)
-                   if f.lower().startswith("geckolib") and f.endswith(".jar")), None)
-if gecko_inst:
-    shutil.move(gecko_inst, gecko_inst + ".bak")
-check("geckolib removed everywhere", not os.path.isfile(dl_jar))
+backup_pairs = []
+for p in dl_jars + inst_jars:
+    bak = p + ".bak"
+    shutil.move(p, bak)
+    backup_pairs.append((p, bak))
+check("geckolib removed everywhere",
+      not any(os.path.isfile(p) for p in dl_jars + inst_jars))
 
 # 2. launch -> expect a crash
 print("\n[REPAIR] Launching broken pack…")
@@ -73,8 +81,9 @@ outcome, st = wait_menu(600)
 if outcome == "menu":
     print("  [WARN] game reached the menu despite missing geckolib — nothing to repair")
     api.stop(bid)
-    if backup_jar:
-        shutil.move(backup_jar, dl_jar)
+    for p, bak in backup_pairs:
+        if os.path.isfile(bak):
+            shutil.move(bak, p)
     sys.exit(1)
 check("crash detected with missing dependency", outcome == "crash",
       (st.get("error") or "")[:100])
@@ -90,11 +99,13 @@ try:
     print(f"  fix result: {res}")
     check("repair added geckolib", "geckolib" in str(res.get("added", [])).lower(), str(res.get("added")))
 finally:
-    if backup_jar and os.path.isfile(backup_jar):
-        os.remove(backup_jar)
-    for f in os.listdir(MODS):
-        if f.endswith(".jar.bak"):
-            os.remove(os.path.join(MODS, f))
+    for p, bak in backup_pairs:
+        if os.path.isfile(bak):
+            os.remove(bak)
+    for d in (MODS, DL_MODS):
+        for f in os.listdir(d):
+            if f.endswith(".jar.bak"):
+                os.remove(os.path.join(d, f))
 
 # 4. relaunch -> main menu
 print("\n[REPAIR] Relaunching repaired pack…")

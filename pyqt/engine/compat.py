@@ -25,6 +25,14 @@ class CompatibilityDatabase:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self.db = sqlite3.connect(self.path, check_same_thread=False)
+
+    def close(self) -> None:
+        """Release the SQLite handle so the DB file is not left locked
+        (critical for temp workspaces / tests on Windows)."""
+        try:
+            self.db.close()
+        except Exception:  # noqa: BLE001
+            pass
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS entries (
                 id TEXT PRIMARY KEY,

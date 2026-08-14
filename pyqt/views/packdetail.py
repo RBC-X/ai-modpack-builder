@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout,
                              QLabel, QLineEdit, QPlainTextEdit, QScrollArea,
                              QSlider, QVBoxLayout, QWidget)
@@ -62,6 +62,11 @@ class PackDetailView(QWidget):
         self._log_stop: threading.Event | None = None
         self._log_view_serial = 0
         self._live_banner = None
+        self._heap_badge: QLabel | None = None
+        self._heap_timer = QTimer(self)
+        self._heap_timer.setInterval(4000)
+        self._heap_timer.timeout.connect(self._refresh_heap_badge)
+        self._heap_timer.start()
 
         outer = QScrollArea(self)
         outer.setWidgetResizable(True)
@@ -281,6 +286,18 @@ class PackDetailView(QWidget):
             meta_text += f"  •  {perf.get('load')} for this PC"
         meta = label(self._hero_inner, meta_text, "mono")
         col.addWidget(meta)
+        # Live 'heap fitted to RAM' badge: re-runs the launch-time fit against
+        # the RAM free RIGHT NOW (not the pack's fixed fitted value) and
+        # refreshes every 4 s while the view is open, so a user sees exactly
+        # what the next PLAY will pick on a machine whose free RAM keeps
+        # shifting. Clicking it jumps to the Settings RAM slider with the
+        # current fit pre-applied.
+        self._heap_badge = pill(self._hero_inner, "", False, "pill-link")
+        self._heap_badge.setToolTip("Click to jump to the Settings RAM slider with this fit pre-applied")
+        self._heap_badge.setMaximumWidth(560)
+        self._heap_badge.clicked.connect(self._jump_to_ram_fit)
+        col.addWidget(self._heap_badge, 0, Qt.AlignmentFlag.AlignLeft)
+        self._refresh_heap_badge()
         head.addLayout(col, 1)
 
         actions = QHBoxLayout()
@@ -310,6 +327,54 @@ class PackDetailView(QWidget):
         actions.addWidget(rename)
         head.addLayout(actions)
         lay.addLayout(head)
+
+    def _refresh_heap_badge(self) -> None:
+        """Re-run the launch-time heap fit against live free RAM and show it.
+
+        Mirrors launch_pack: requested = fit_xmx_mb(ramGB), then the adaptive
+        fit_xmx_to_free_mb down-fits it to what is actually free right now.
+        The badge makes the fit visible and self-updates every 4 s so a user
+        sees the exact heap the next PLAY would pick.
+        """
+        if not self.build_id or not self.record or self._heap_badge is None:
+            return
+        try:
+            from engine.hardware import fit_xmx_mb, fit_xmx_to_free_mb
+            r = self.record or {}
+            reqs = r.get("requirements") or {}
+            perf = r.get("perfEstimate") or {}
+            ram_gb = int(reqs.get("ramGB") or 0) or int(perf.get("recommendedAllocationMB", 0) // 1024 or 0) or 8
+            requested = fit_xmx_mb(ram_gb)
+            free = float((self.api.free_ram() or {}).get("freeGb") or 0)
+            fitted = fit_xmx_to_free_mb(requested, free) if free else requested
+            self._heap_fit_gb = max(2, min(16, round(fitted / 1024)))
+            if fitted < requested:
+                text = f"Heap fit to RAM: {requested} → {fitted} MB on next launch ({free:.1f} GB free)"
+            else:
+                text = f"Heap {requested} MB fits free RAM ({free:.1f} GB free)"
+            self._heap_badge.setText(text)
+            self._heap_badge.setStyleSheet("")
+        except Exception:
+            pass
+
+    def _jump_to_ram_fit(self) -> None:
+        """Open the Settings tab and pre-apply the current free-RAM heap fit to
+        the RAM slider, so the user can review and APPLY RAM without
+        recomputing the fit themselves."""
+        if not self.record:
+            return
+        self._set_tab("settings")
+        if getattr(self, "_ram_slider", None) is None:
+            return
+        gb = getattr(self, "_heap_fit_gb", None)
+        if gb is None:
+            return
+        try:
+            self._ram_slider.setValue(gb)
+            if self._ram_label is not None:
+                self._ram_label.setText(f"Allocated RAM: {gb} GB (heap fit pre-applied)")
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------------
     def _render_tab(self) -> None:

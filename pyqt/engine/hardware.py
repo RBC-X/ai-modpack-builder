@@ -109,6 +109,22 @@ def fit_xmx_mb(requested_gb: int = 8) -> int:
     return max(2048, int(fitted // 256 * 256))
 
 
+def fit_xmx_to_free_mb(requested_mb: int, free_gb: float, reserve_gb: float = 1.5) -> int:
+    """Fit the JVM heap to the RAM actually free at launch time (adaptive 1.5-4 GB).
+
+    A fixed fitted heap overcommits a low-RAM machine: on this 7 GB box the
+    155-mod pack at a 4 GB heap dies with a clean exit 0 (no crash report, no
+    event-log entry) when only ~1-2 GB are free at launch, while a 2.5 GB
+    heap reaches resource loading before OOMing. Reserve ~1.5 GB for the OS
+    plus the game's native/off-heap footprint, cap the heap to whatever
+    remains, and clamp to [1536, 4096] MB in 256 MB steps — never below
+    1.5 GB, since smaller heaps cannot reach the menu on 150+ mod packs.
+    """
+    available_mb = max(0.0, float(free_gb) - reserve_gb) * 1024
+    fitted = min(int(requested_mb), int(available_mb))
+    return max(1536, min(4096, int(fitted // 256 * 256)))
+
+
 def performance_estimate(hardware: dict, ram_gb: int = 0, target_fps: int = 60,
                          mod_count: int = 80, shaders: bool = False,
                          res: str = "1920x1080") -> dict:

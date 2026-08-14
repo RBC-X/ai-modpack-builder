@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
-                             QScrollArea, QSlider, QTextEdit, QVBoxLayout, QWidget)
+                             QScrollArea, QSizePolicy, QSlider, QTextEdit,
+                             QVBoxLayout, QWidget)
 
 import theme
 from common import (button, card, clear_layout, icon_pixmap, label, pill,
@@ -38,6 +39,13 @@ class AIBuilderView(QWidget):
         self._stages = list(STAGES)
         self._seen: set[str] = set()
         self._completed_build: str | None = None
+        # Stream/poll lifecycle (Issue 14): a session generation + stop event
+        # bound every background thread. A new build or widget destruction
+        # cancels the previous session so stale callbacks can't touch the UI.
+        import threading
+        self._session = 0
+        self._stop_stream = threading.Event()
+        self.destroyed.connect(self._cancel_session)
 
         outer = QScrollArea(self)
         outer.setWidgetResizable(True)
@@ -68,14 +76,15 @@ class AIBuilderView(QWidget):
         head.addWidget(t)
         self._source_desc = label(header, "Describe what you want to play. Loading the engine's configured providers…", "sub")
         self._source_desc.setWordWrap(True)
-        self._source_desc.setFixedWidth(720)
+        self._source_desc.setMaximumWidth(720)
         self._source_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         head.addWidget(self._source_desc)
         self.root.addWidget(header)
 
         self._input_card = card(body)
-        self._input_card.setFixedWidth(960)
+        self._input_card.setMaximumWidth(960)
         self._input_card.setFixedHeight(232)
+        self._input_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._input_lay = vbox(self._input_card, 12, margins=(16, 16, 16, 16))
         self._prompt = QTextEdit(self._input_card)
         self._prompt.setPlaceholderText("Make me a Minecraft 1.20.1 medieval fantasy RPG with around 120 mods, Create, magic, bosses, "
@@ -106,8 +115,9 @@ class AIBuilderView(QWidget):
         self._input_lay.addLayout(chip_rows)
 
         self._settings_card = card(body)
-        self._settings_card.setFixedWidth(960)
+        self._settings_card.setMaximumWidth(960)
         self._settings_card.setFixedHeight(116)
+        self._settings_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._settings_lay = vbox(self._settings_card, 12, margins=(16, 14, 16, 14))
         toprow = QHBoxLayout()
         hw_icon = QLabel(self._settings_card)
@@ -195,14 +205,16 @@ class AIBuilderView(QWidget):
 
         # Build timeline card
         self._timeline_card = card(body)
-        self._timeline_card.setFixedWidth(960)
+        self._timeline_card.setMaximumWidth(960)
+        self._timeline_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._timeline_lay = vbox(self._timeline_card, 10, margins=(20, 16, 20, 16))
         self._timeline_card.setVisible(False)
         self.root.addWidget(self._timeline_card, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # Completed card
         self._done_card = card(body)
-        self._done_card.setFixedWidth(960)
+        self._done_card.setMaximumWidth(960)
+        self._done_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._done_lay = vbox(self._done_card, 14, margins=(30, 26, 30, 26))
         self._done_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._done_card.setVisible(False)
@@ -273,10 +285,20 @@ class AIBuilderView(QWidget):
         btn.setText("Advanced Settings ▴" if self._show_adv else "Advanced Settings ▾")
 
     # ------------------------------------------------------------------
+    def _cancel_session(self) -> None:
+        """Cancel the current build's stream/poll session (new build or the
+        widget being destroyed). Callbacks from the old generation are dropped."""
+        self._session += 1
+        self._stop_stream.set()
+
     def _start(self) -> None:
         prompt = self._prompt.toPlainText().strip()
         if not prompt:
             return
+        # Cancel any previous session before starting a new build.
+        import threading
+        self._session += 1
+        self._stop_stream = threading.Event()
         req = {
             "prompt": prompt,
             "mcVersion": None if self._mc_box.currentText() == "auto" else self._mc_box.currentText(),
@@ -309,35 +331,44 @@ class AIBuilderView(QWidget):
         run_async(start, ok, err)
 
     def _stream(self, build_id: str) -> None:
-        def run():
-            for ev in self.api.events(build_id):
-                pass  # events consumed on the UI thread via a bridge
-            return None
-
         # SSE is consumed in a worker; each event is delivered to the UI thread
         # through the queued-signal bridge (QTimer.singleShot from a worker
         # thread never fires — it has no event loop). The engine keeps a
         # finished build's stream open forever, so a second loop polls the
         # build record for a terminal status and calls _finish.
+        #
+        # Lifecycle safety (Issue 14): every thread is bound to the current
+        # session generation and a stop event. A new build or widget
+        # destruction cancels the previous session; callbacks from a stale
+        # generation can never touch the UI for a newer build.
         import threading
         import time
         from common import _post
+
+        gen = self._session
+        stop = self._stop_stream
+
+        def current() -> bool:
+            return gen == self._session and not stop.is_set()
 
         def consume():
             n = 0
             try:
                 for ev in self.api.events(build_id):
+                    if not current():
+                        break
                     n += 1
-                    _post(self._on_event, ev)
+                    _post(lambda e, g=gen: self._on_event(e) if g == self._session else None, ev)
             except Exception as e:  # noqa: BLE001
                 print(f"[aibuilder-consume] stopped after {n} events: {e}", flush=True)
             print(f"[aibuilder-consume] stream ended, {n} events read", flush=True)
 
-        t = threading.Thread(target=consume, daemon=True)
-        t.start()
+        threading.Thread(target=consume, daemon=True).start()
 
         def worker():
-            while True:
+            delay = 1.0
+            deadline = time.time() + 45 * 60  # hard cap so a hung engine can't spin forever
+            while current():
                 try:
                     rec = self.api.build(build_id)
                 except Exception as e:  # noqa: BLE001
@@ -345,10 +376,17 @@ class AIBuilderView(QWidget):
                     print(f"[aibuilder-poll] {e}", flush=True)
                 if rec.get("status") in ("done", "failed", "repaired", "stopped"):
                     break
-                time.sleep(2)
+                if time.time() > deadline:
+                    print("[aibuilder-poll] deadline reached without terminal status", flush=True)
+                    rec = {}
+                    break
+                time.sleep(delay)
+                delay = min(delay * 2, 8.0)  # bounded backoff on transient errors
+            stop.set()  # tell the event consumer to stop reading too
             print(f"[aibuilder-poll] terminal status: {rec.get('status')}", flush=True)
             time.sleep(0.6)  # let the last events flush through the bridge
-            _post(lambda record: self._finish(build_id, record), rec)
+            if gen == self._session:
+                _post(lambda record: self._finish(build_id, record), rec)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -409,22 +447,44 @@ class AIBuilderView(QWidget):
             self._steps[idx]["detail"] = detail
         self._render_timeline()
 
+    @staticmethod
+    def _terminal_outcome(record: dict) -> dict:
+        """One authoritative terminal state for a build record.
+
+        Prefers record['testResult'] — the engine's current result — over the
+        test list; falls back to the latest recorded test. Both _finish and
+        _show_done use this so the timeline, done card, badge and Play
+        availability can never disagree (Issue 13).
+        """
+        if record.get("testResult"):
+            return record["testResult"]
+        tests = record.get("tests") or []
+        return tests[-1] if tests else {}
+
+    @staticmethod
+    def _build_failed(record: dict) -> bool:
+        if record.get("status") == "failed":
+            return True
+        res = AIBuilderView._terminal_outcome(record)
+        return bool(res and res.get("status") == "FAIL")
+
     def _finish(self, build_id: str, record: dict | None = None) -> None:
         self._build_btn.setEnabled(True)
         self._build_btn.setText("BUILD MODPACK WITH AI")
         record = record or {}
-        tests = record.get("tests") or []
-        failed = record.get("status") == "failed" or any(t.get("status") == "FAIL" for t in tests)
-        if failed:
-            for step in self._steps:
+        failed = self._build_failed(record)
+        for step in self._steps:
+            if failed:
+                # explicit failed stays failed; anything still in flight is
+                # terminal-failed with the build.
                 if step["status"] == "in_progress":
                     step["status"] = "failed"
-        else:
-            # A terminal successful build record is authoritative evidence
-            # that every pipeline stage completed even if an SSE event was
-            # missed during a reconnect.
-            for step in self._steps:
-                if step["status"] == "pending":
+            else:
+                # A terminal successful build record is authoritative evidence
+                # that every pipeline stage completed even if an SSE event was
+                # missed during a reconnect (Issue 12): pending AND in_progress
+                # stages all resolve to completed.
+                if step["status"] in ("pending", "in_progress"):
                     step["status"] = "completed"
         self._render_timeline()
         self._show_done(build_id, record)
@@ -472,11 +532,10 @@ class AIBuilderView(QWidget):
         from common import clear_layout
         clear_layout(self._done_lay)
         record = record or {}
-        tests = record.get("tests") or []
-        first_test = tests[0] if tests else {}
-        test_status = str(first_test.get("status") or "NOT RECORDED")
-        test_level = str(first_test.get("level") or "")
-        failed = record.get("status") == "failed" or test_status == "FAIL"
+        res = self._terminal_outcome(record)
+        test_status = str(res.get("status") or "NOT RECORDED")
+        test_level = str(res.get("level") or "")
+        failed = self._build_failed(record)
         ic = QLabel(self._done_card)
         ic.setPixmap(icon_pixmap("alert" if failed else "checkcircle", theme.DANGER if failed else theme.GREEN, 44))
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)

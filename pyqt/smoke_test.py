@@ -94,6 +94,10 @@ try:
     check("open pack detail", True)
     check("pack hero uses compact launcher proportions", win.packdetail._hero.height() == 280,
           f"{win.packdetail._hero.height()} px")
+    badge = win.packdetail._heap_badge
+    check("heap-fit badge renders on pack detail",
+          badge is not None and bool(badge.text()) and "Heap" in badge.text(),
+          badge.text() if badge else "missing")
     win.packdetail._set_tab("content")
     app.processEvents()
     content_placeholders = [w.placeholderText() for w in win.packdetail._body.findChildren(QLineEdit)]

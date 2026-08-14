@@ -24,16 +24,67 @@ IGNORE_PREFIXES = [
 
 THROWABLE_RE = re.compile(r"^(?:(?:Caused by: |Exception in thread \"[^\"]*\" |java\.lang\.)?)([A-Za-z_$][\w.$]*(?:Error|Exception|RuntimeException))(?::|\s|$)", re.M)
 
+# Forge writes a log-level prefix on every log line: [HH:MM:SS] [thread/LEVEL]:
+_LOG_LINE_RE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] \[([^]]+)/(WARN|INFO|DEBUG|ERROR|FATAL)\]:?\s?(.*)$")
+
+# Class-load probes: Forge scans optional/disabled compat classes at startup in
+# EVERY healthy pack and logs the misses ("Error loading class: X
+# (java.lang.ClassNotFoundException: Y)" WARN one-liners, ERROR "Failed to
+# load:" blocks for optional compat discovery). None of that is crash evidence.
+_CLASS_PROBE_RE = re.compile(r"ClassNotFoundException|NoClassDefFoundError|Error loading class|Failed to load:", re.I)
+
+# A line that raises or continues a real stack trace: a bare throwable header
+# (crash-report / JVM stderr / fatal-screen format), optionally prefixed with
+# "Caused by: " / "Exception in thread \"...\" " / "java.lang.".
+_THROWABLE_LINE_RE = re.compile(
+    r"^(?:(?:Caused by: |Exception in thread \"[^\"]*\" |java\.lang\.)?)"
+    r"([A-Za-z_$][\w.$]*(?:Error|Exception|RuntimeException))(?::|\s|$)")
+
+
+_FRAME_RE = re.compile(r"^\s*at\s+([A-Za-z_$][\w.$]*?)\.(?:[a-zA-Z_$][\w$]*|<\w+>|lambda\$[\w.$]*|class_\w+)\(")
+
 
 def extract_stack_frames(text: str) -> list:
+    """Frames from REAL exception stack traces only.
+
+    The whole log is never crash evidence. Harmless class-load probes —
+    Forge's "Error loading class: ... ClassNotFoundException ..." WARN
+    one-liners and the ERROR "Failed to load:" blocks for optional compat
+    classes — appear in every healthy pack and must never contribute frames.
+    Only ``at ...`` lines inside a block rooted at a genuine raised exception
+    (crash-report / JVM stderr / fatal-screen format) are collected.
+    """
     out = []
-    re_ = re.compile(r"^\s*at\s+([A-Za-z_$][\w.$]*?)\.(?:[a-zA-Z_$][\w$]*|<\w+>|lambda\$[\w.$]*|class_\w+)\(", re.M)
-    for m in re_.finditer(text):
-        cls = m.group(1)
-        if cls not in out:
-            out.append(cls)
-        if len(out) >= 60:
-            break
+    in_trace = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        m = _LOG_LINE_RE.match(line)
+        if m:
+            level, body = m.group(2), m.group(3)
+            # WARN/INFO/DEBUG lines can never be crash evidence (class-load
+            # probes, "Error loading class:" one-liners, loader chatter).
+            if level in ("WARN", "INFO", "DEBUG"):
+                in_trace = False
+                continue
+            # An ERROR/FATAL line opens a trace only if it actually names a
+            # raised exception that is not a class-load probe.
+            in_trace = bool(_THROWABLE_LINE_RE.match(body) and not _CLASS_PROBE_RE.search(body))
+            continue
+        # Bare lines (crash report / JVM stderr / fatal error screen).
+        if _THROWABLE_LINE_RE.match(line) and not _CLASS_PROBE_RE.search(line):
+            in_trace = True
+            continue
+        fm = _FRAME_RE.match(line)
+        if fm:
+            if in_trace:
+                cls = fm.group(1)
+                if cls not in out:
+                    out.append(cls)
+                    if len(out) >= 60:
+                        break
+            continue
+        # Anything else (blank lines, "... N more", loader chatter) closes the trace.
+        in_trace = False
     return out
 
 

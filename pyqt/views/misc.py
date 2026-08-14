@@ -35,7 +35,8 @@ class DownloadsView(QWidget):
         self.root = vbox(body, 24, margins=(32, 32, 32, 30))
         self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
         download_head = QWidget(body)
-        download_head.setFixedWidth(960)
+        download_head.setMaximumWidth(960)
+        download_head.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         download_head_lay = vbox(download_head, 0, margins=0)
         download_head_lay.addWidget(label(download_head, "Download Manager", "h1"))
         download_head_lay.addWidget(label(
@@ -45,10 +46,11 @@ class DownloadsView(QWidget):
         ))
         self.root.addWidget(download_head, 0, Qt.AlignmentFlag.AlignHCenter)
         self._status = label(body, "Loading download history…", "muted")
-        self._status.setFixedWidth(960)
+        self._status.setMaximumWidth(960)
         self.root.addWidget(self._status, 0, Qt.AlignmentFlag.AlignHCenter)
         self._list_wrap = QWidget(body)
-        self._list_wrap.setFixedWidth(960)
+        self._list_wrap.setMaximumWidth(960)
+        self._list_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._list = vbox(self._list_wrap, 8, margins=0)
         self.root.addWidget(self._list_wrap, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -63,27 +65,16 @@ class DownloadsView(QWidget):
 
     def _refresh(self) -> None:
         def fetch():
-            builds = self.api.builds()
-            rows = []
-            for b in builds[:12]:
-                try:
-                    rec = self.api.build(b["buildId"])
-                except Exception:  # noqa: BLE001
-                    continue
-                for d in (rec.get("downloads") or [])[-12:]:
-                    rows.append({
-                        "name": d.get("filename") or d.get("key") or "file",
-                        "provider": (d.get("key") or "").split(":")[0],
-                        "sizeBytes": d.get("sizeBytes") or 0,
-                        "sha1": d.get("sha1") or "",
-                        "status": d.get("status") or "ok",
-                        "build": b.get("name") or b.get("buildId"),
-                        "error": d.get("error"),
-                    })
-            return rows
+            # Global engine query — active downloads first, then recent history
+            # across ALL packs (Issue 25), not an arbitrary first-N window.
+            return (self.api.download_summary(120) or {}).get("rows") or []
 
         def ok(rows):
-            self._status.setText(f"{len(rows)} download records across your packs.")
+            active = sum(1 for r in rows if str(r.get("status") or "").lower()
+                         in {"queued", "pending", "downloading", "verifying"})
+            self._status.setText(
+                f"{len(rows)} download records across your packs"
+                + (f" ({active} active)" if active else "."))
             self._status.setVisible(False)
             self._render(rows)
 
@@ -179,7 +170,8 @@ class ActivityView(QWidget):
         self.root = vbox(body, 24, margins=(32, 32, 32, 30))
         self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
         activity_head = QWidget(body)
-        activity_head.setFixedWidth(960)
+        activity_head.setMaximumWidth(960)
+        activity_head.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         activity_head_lay = vbox(activity_head, 0, margins=0)
         activity_head_lay.addWidget(label(activity_head, "Activity & Diagnostics", "h1"))
         activity_head_lay.addWidget(label(
@@ -190,7 +182,9 @@ class ActivityView(QWidget):
         self.root.addWidget(activity_head, 0, Qt.AlignmentFlag.AlignHCenter)
 
         tabs_frame = QFrame(body)
-        tabs_frame.setFixedSize(960, 42)
+        tabs_frame.setMaximumWidth(960)
+        tabs_frame.setFixedHeight(42)
+        tabs_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         tabs_frame.setProperty("cls", "tabs-bar")
         theme.polish(tabs_frame)
         tabs = hbox(tabs_frame, 8, margins=(0, 0, 0, 8))
@@ -208,7 +202,7 @@ class ActivityView(QWidget):
         self.root.addWidget(tabs_frame, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self._body = QFrame(body)
-        self._body.setFixedWidth(960)
+        self._body.setMaximumWidth(960)
         self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._body_lay = vbox(self._body, 10)
         self.root.addWidget(self._body, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -1085,7 +1079,8 @@ class SettingsView(QFrame):
             return self.api.hardware_refresh()
 
         def ok(_res):
-            self.showEvent(None)
+            # Explicit refresh, not a manual framework lifecycle invocation.
+            self._refresh()
 
         run_async(fetch, ok, None)
 

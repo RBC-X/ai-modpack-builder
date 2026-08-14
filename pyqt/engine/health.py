@@ -52,8 +52,15 @@ def _metric(label: str, score: float, reasons: list, weight: float) -> dict:
 
 
 def _test_status(rec: dict) -> dict:
+    """Single source of truth for validation status (Issue 26/30): a recorded
+    test only describes the revision it tested. If the pack changed since, the
+    verdict is NEEDS_VALIDATION — never a PASS badge describing a different
+    pack."""
     tr = rec.get("testResult") or {}
     status = tr.get("status")
+    tested = int(tr.get("testedRevision") or 0)
+    if tested and int(rec.get("revision") or 0) != tested:
+        status = "NEEDS_VALIDATION"
     level = tr.get("level")
     phases = tr.get("phases") or []
     passed = sum(1 for p in phases if p.get("status") == "PASS")
@@ -139,6 +146,9 @@ def pack_health(rec: dict, build_dir=None, hardware: dict | None = None) -> dict
     elif test["status"] == "FAIL":
         base = 12.0
         reasons.append("The last test failed — the pack may not launch")
+    elif test["status"] == "NEEDS_VALIDATION":
+        base = 45.0
+        reasons.append("The pack changed since its last test — run a re-test for current evidence")
     else:
         base = 45.0
         reasons.append("No test result recorded yet — run a re-test for real evidence")

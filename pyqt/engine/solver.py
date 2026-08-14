@@ -243,6 +243,12 @@ def resolve_pack(opts: dict) -> dict:
             return None
         if lock:
             node["locked"] = True
+        # A preserved parent selection pins its exact version (candidate edits
+        # must not silently drift every preserved mod to a newer build).
+        if seed.get("pinnedVersionId"):
+            cons = constraints.setdefault(k, [])
+            if not any(c.get("pinnedVersionId") == seed["pinnedVersionId"] for c in cons):
+                cons.append({"pinnedVersionId": seed["pinnedVersionId"]})
         lst = ensure_candidates(seed["provider"], seed["projectId"], node)
         if not lst:
             issues.append({

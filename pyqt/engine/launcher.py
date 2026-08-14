@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 
 from .core import builds_dir
-from .hardware import fit_xmx_mb
+from .hardware import fit_xmx_mb, fit_xmx_to_free_mb
 from .instance import install_mod_jars, install_resource_packs, install_shader_packs, remove_jar
 from .tester import assemble, build_client_args
 from .repair import (parse_crash_report, missing_dep_ids, fatal_startup_detected,
@@ -314,15 +314,44 @@ def collect_launch_evidence(game_dir, log_file, opts: dict = None) -> dict:
             tail = "\n".join(text.splitlines()[-800:])
             if re.search(r"The game crashed whilst|MISSING EXCEPTION MESSAGE|Failure message: Mod .* requires|"
                          r"which is not installed|Some of your mods are incompatible with the game or each other!|"
-                         r"which is missing!|ClassMetadataNotFoundException|MixinTransformerError", tail):
+                         r"which is missing!|ClassMetadataNotFoundException|MixinTransformerError|"
+                         r"Missing or unsupported mandatory dependenc|Mod ID: '[^']+', Requested by:|"
+                         r"A potential solution has been determined|There was a severe problem during mod loading|"
+                         r"Mod loading error has occurred", tail):
                 m = (re.search(r"The game crashed whilst ([^\n]*)", tail) or
                      re.search(r"ClassMetadataNotFoundException: ([\w.$]+)", tail) or
-                     re.search(r"(Failure message: Mod [^\n]*|Some of your mods are incompatible with the game or each other![^\n]*)", tail))
+                     re.search(r"Mod ID: '([a-zA-Z0-9_\-]+)', Requested by:", tail) or
+                     re.search(r"(Failure message: Mod [^\n]*|Some of your mods are incompatible with the game or each other![^\n]*|Missing or unsupported mandatory dependenc[^\n]*)", tail))
                 out["crash"] = m.group(1)[:220] if m else "Fatal startup error — see log"
                 if not out["missingDeps"]:
                     out["missingDeps"] = missing_dep_ids(tail)
         except OSError:
             pass
+    if not out["crash"] or not out["missingDeps"]:
+        # Forge fatal-startup errors write their mod-load failure text to the
+        # instance's latest.log/debug.log — not to crash-reports/ and often not
+        # to the captured console either. Fall back so the crash drawer still
+        # gets the crash text and its missing-mod pills.
+        for rel in ("logs/latest.log", "logs/debug.log"):
+            try:
+                p = gd / rel
+                if not p.exists():
+                    continue
+                text = p.read_text("utf-8", "replace")
+                if re.search(r"Missing or unsupported mandatory dependenc|Mod ID: '[^']+', Requested by:|"
+                             r"A potential solution has been determined|There was a severe problem during mod loading|"
+                             r"Mod loading error has occurred|Failure message: Mod .* requires|"
+                             r"which is missing!|which is not installed|The game crashed whilst", text):
+                    if not out["crash"]:
+                        m = (re.search(r"Mod ID: '([a-zA-Z0-9_\-]+)', Requested by:", text) or
+                             re.search(r"Failure message: Mod [^\n]*", text) or
+                             re.search(r"The game crashed whilst ([^\n]*)", text))
+                        out["crash"] = m.group(1)[:220] if m else "Fatal startup error — see log"
+                    if not out["missingDeps"]:
+                        out["missingDeps"] = missing_dep_ids(text)
+                    break
+            except OSError:
+                continue
     return out
 
 
@@ -425,12 +454,6 @@ def launch_pack(record: dict, opts: dict) -> dict:
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }),
     }
-    logger.stage("launch", f"Launching pack for play ({record.get('name') or build_id}, {mc} {loader}, {env['xmxMB']} MB)…")
-    assembled = assemble(env)
-    report({**state, "phase": "preparing", "progress": 46, "stage": "Preparing game files…",
-            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    report({**state, "phase": "preparing", "progress": 50, "stage": "Launching game…",
-            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     session = opts.get("session")
     # Concurrent-play hardening: when another pack is already running, lower
     # this pack's GPU load (FPS cap + smaller window) so two OpenGL windows
@@ -441,6 +464,12 @@ def launch_pack(record: dict, opts: dict) -> dict:
     # pack sits at ~0.2 GB free at the menu and gets terminated).
     free_gb = free_physical_gb()
     refuse_below = 1.5 if concurrent else 1.0
+    # Headless/CI escape hatch: the deep-tester and repair exercises launch
+    # real games on constrained boxes where the guard would refuse; an
+    # explicit env override keeps the guard intact for normal users while
+    # letting harnesses take the risk (the sub-3 GB warning still fires).
+    if os.environ.get("AMB_BYPASS_RAM_GUARD") == "1":
+        refuse_below = 0.0
     if free_gb < refuse_below:
         raise RuntimeError(
             f"Not enough free RAM ({free_gb} GB) to run this pack safely"
@@ -449,6 +478,25 @@ def launch_pack(record: dict, opts: dict) -> dict:
               "or stop the running pack first.")
     if free_gb < 3.0:
         logger.warn("launch", f"Only {free_gb} GB of RAM free — the pack may not stay stable at the menu")
+    # Fit the heap to the RAM actually free right now (adaptive 1.5-4 GB)
+    # instead of the pack's fixed fitted value, so a 155-mod pack does not
+    # launch into an overcommitted machine. Harnesses that explicitly bypass
+    # the RAM guard keep the requested heap — they take the risk on purpose.
+    if os.environ.get("AMB_BYPASS_RAM_GUARD") != "1":
+        requested = env["xmxMB"]
+        fitted = fit_xmx_to_free_mb(requested, free_gb)
+        if fitted != requested:
+            env["xmxMB"] = fitted
+            logger.warn("launch", f"Fitted heap {requested} MB → {fitted} MB (only {free_gb:.1f} GB RAM free)")
+            state["heapFit"] = f"Heap fitted to RAM: {requested} → {fitted} MB ({free_gb:.1f} GB free)"
+        elif "heapFit" in state:
+            del state["heapFit"]
+    logger.stage("launch", f"Launching pack for play ({record.get('name') or build_id}, {mc} {loader}, {env['xmxMB']} MB)…")
+    assembled = assemble(env)
+    report({**state, "phase": "preparing", "progress": 46, "stage": "Preparing game files…",
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    report({**state, "phase": "preparing", "progress": 50, "stage": "Launching game…",
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     width, height = 1280, 720
     if concurrent:
         width, height = 960, 540
@@ -495,6 +543,15 @@ def launch_pack(record: dict, opts: dict) -> dict:
     def advance(extra_lines):
         nonlocal state, menu_at
         if state.get("phase") == "error":
+            # The fatal-startup state can be set before latest.log finishes
+            # flushing its missing-dependency text. Re-run the evidence merge
+            # on later batches so missingDeps/crashFiles still reach the UI
+            # (the crash drawer's pills) once the log is flushed.
+            merged = apply_evidence(state)
+            if (merged.get("missingDeps") != state.get("missingDeps")
+                    or merged.get("crashFiles") != state.get("crashFiles")):
+                state = merged
+                report(merged)
             return
         for line in extra_lines:
             if line.strip():
@@ -575,6 +632,9 @@ def launch_pack(record: dict, opts: dict) -> dict:
         args, cwd=str(game_dir), env=dict(os.environ),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
         creationflags=(subprocess.CREATE_NO_WINDOW if _IS_WIN else 0) | getattr(subprocess, "DETACHED_PROCESS", 0),
+        # POSIX: own session/process-group so _kill_tree() never touches a
+        # group shared with the launcher (Issue 17).
+        start_new_session=(False if _IS_WIN else True),
         text=True, errors="replace", bufsize=1,
     )
     proc._amb_game_dir = str(game_dir)

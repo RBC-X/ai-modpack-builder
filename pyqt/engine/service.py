@@ -55,7 +55,7 @@ from .compat import CompatibilityDatabase
 from .identity import derive_identity, apply_intents
 from .snapshots import (create_snapshot, list_snapshots, load_snapshot,
                         last_known_good as _lkg_snapshot, mark_last_known_good,
-                        restore_from_snapshot)
+                        restore_from_snapshot, restore_config)
 from .plan import plan_change
 from .health import pack_health
 from .jarmeta import essential_libraries, norm_id
@@ -77,9 +77,53 @@ def _without_secrets(value):
 # Build record helpers
 # ---------------------------------------------------------------------------
 
+def _bump_revision(rec: dict) -> int:
+    """Every content mutation of a pack advances its revision. Test results
+    record the exact revision they tested; anything comparing test evidence to
+    the current pack must compare these two numbers."""
+    rec["revision"] = int(rec.get("revision") or 0) + 1
+    return rec["revision"]
+
+
+def _normalized_test_status(rec: dict) -> str | None:
+    """Single source of truth for the pack's validation state.
+
+    A recorded test only describes the pack it tested. If the pack changed
+    since (revision bumped), the old verdict is stale — the pack needs
+    validation again, never a PASS/FAIL badge describing a different pack.
+    """
+    tr = rec.get("testResult") or {}
+    status = tr.get("status")
+    if not status:
+        return None
+    tested = int(tr.get("testedRevision") or 0)
+    if tested and int(rec.get("revision") or 0) != tested:
+        return "NEEDS_VALIDATION"
+    return status
+
+
 def _summary_record(rec: dict) -> dict:
     req = rec.get("requirements") or {}
     ps = rec.get("packStats") or {}
+    perf = rec.get("perfEstimate") or {}
+    selections = rec.get("selections") or []
+    # Lightweight presentation fields so every pack's Library/Home card has an
+    # image + fit without fetching the full record (the 25-pack enrich limit
+    # only ever covered the front of the list).
+    icon_url = rec.get("iconUrl")
+    cover_url = rec.get("coverUrl")
+    if not icon_url:
+        for s in selections:
+            if s.get("provider") == "modrinth" and s.get("projectId"):
+                icon_url = f"https://cdn.modrinth.com/data/{s['projectId']}/icon.png"
+            elif s.get("iconUrl"):
+                icon_url = s["iconUrl"]
+            if icon_url:
+                break
+    if not cover_url and icon_url:
+        cover_url = icon_url
+    perf_load = perf.get("load") or ""
+    revision = int(rec.get("revision") or 0)
     return {
         "buildId": rec.get("buildId"), "name": rec.get("name"),
         "request": rec.get("request"), "status": rec.get("status"),
@@ -88,12 +132,19 @@ def _summary_record(rec: dict) -> dict:
         "loader": req.get("loader"),
         "modCount": ps.get("modCount", 0),
         "createdAt": rec.get("createdAt"), "updatedAt": rec.get("updatedAt"),
-        "testStatus": (rec.get("testResult") or {}).get("status"),
+        "testStatus": _normalized_test_status(rec),
+        "revision": revision,
+        "testedRevision": int((rec.get("testResult") or {}).get("testedRevision") or 0),
         "running": rec.get("running", False),
         "loaderVersion": rec.get("loaderVersion"),
         "launchPhase": rec.get("launchPhase"),
         "launchError": rec.get("launchError"),
         "failure": rec.get("failure"),
+        "iconUrl": icon_url,
+        "coverUrl": cover_url,
+        "description": rec.get("request") or rec.get("finalReport") or "",
+        "hardwareFit": f"{str(perf_load).title()} load" if perf_load else "",
+        "ramTarget": f"{req.get('ramGB')} GB RAM target" if req.get("ramGB") else "",
     }
 
 
@@ -199,6 +250,12 @@ class PyEngine:
         self._hardware = self._detect(force=True)
         return self._hardware
 
+    def free_ram(self) -> dict:
+        """Live free physical RAM right now (used by the Pack Detail heap badge
+        and any view that wants to show the launch-time fit)."""
+        from .launcher import free_physical_gb
+        return {"freeGb": free_physical_gb()}
+
     def _detect(self, force: bool = False) -> dict:
         det = detect_hardware(force)
         s = self.settings_store.load()
@@ -270,32 +327,114 @@ class PyEngine:
         return rec
 
     def files(self, build_id: str) -> list:
+        """Explicit evidence/files contract for Pack Detail's Logs tab.
+
+        Enumerates real, readable evidence files as safe relative logical paths
+        (never arbitrary filesystem paths): game logs, launch/engine logs,
+        crash-reports, JVM hs_err logs — plus the download/export records the
+        Download Manager expects. Every path is containment-checked.
+        """
         rec = self._read_record(build_id) or {}
+        bdir = self._build_dir(build_id)
+        gd = bdir / "instance" / "minecraft"
         out = []
+
+        def add(rel_path: str, kind: str) -> None:
+            # Containment: rel_path must resolve inside the build dir.
+            root = bdir.resolve()
+            try:
+                (root / rel_path).resolve().relative_to(root)
+            except (ValueError, OSError):
+                return
+            cands = [gd / rel_path, bdir / rel_path]
+            p = next((c for c in cands if c.is_file()), None)
+            if p is None:
+                return
+            try:
+                st = p.stat()
+            except OSError:
+                return
+            out.append({
+                "path": rel_path, "name": Path(rel_path).name, "kind": kind,
+                "sizeBytes": st.st_size,
+                "modifiedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.localtime(st.st_mtime)),
+                "readable": True,
+            })
+
+        for name in ("logs/latest.log", "logs/debug.log"):
+            add(name, "game-log")
+        add("logs/launch-play.log", "launch-log")
+        add("logs/events.jsonl", "engine-events")
+        try:
+            for p in sorted((gd / "crash-reports").glob("*.txt")):
+                add(f"crash-reports/{p.name}", "crash-report")
+        except OSError:
+            pass
+        try:
+            for p in sorted(gd.glob("hs_err_pid*.log")):
+                add(p.name, "jvm-crash")
+        except OSError:
+            pass
+        # Download + export records (logical paths, non-readable as logs).
         for d in rec.get("downloads") or []:
             out.append({
+                "path": f"downloads/{d.get('filename') or '?'}",
                 "filename": d.get("filename"), "size": d.get("sizeBytes") or 0,
                 "status": d.get("status"), "error": d.get("error"),
-                "slug": d.get("key", "").split(":")[-1],
+                "slug": d.get("key", "").split(":")[-1], "kind": "download",
             })
         for e in rec.get("exports") or []:
             out.append({"filename": Path(e["path"]).name, "size": e.get("sizeBytes") or 0,
-                        "status": "ok", "kind": e.get("kind"), "export": True})
+                        "status": "ok", "kind": e.get("kind"), "export": True,
+                        "path": f"exports/{Path(e['path']).name}"})
         return out
 
+    def read_file(self, build_id: str, logical_path: str) -> str:
+        """Read an evidence file by safe logical path (containment-checked).
+
+        `../secret` and other escapes are refused; only files inside the build
+        directory (game dir or build logs) are ever read.
+        """
+        bdir = self._build_dir(build_id).resolve()
+        gd = bdir / "instance" / "minecraft"
+        lp = (logical_path or "").replace("\\", "/").lstrip("/")
+        if not lp or ".." in lp.split("/") or lp.startswith("/"):
+            raise PermissionError(f"unsafe evidence path: {logical_path!r}")
+        for c in (gd / lp, bdir / lp):
+            try:
+                c.resolve().relative_to(bdir)
+            except (ValueError, OSError):
+                raise PermissionError(f"path escapes the build directory: {logical_path!r}")
+        p = next((c for c in (gd / lp, bdir / lp) if c.is_file()), None)
+        if p is None:
+            raise KeyError(f"evidence file not found: {logical_path}")
+        return p.read_text("utf-8", "replace")
+
     def log(self, build_id: str, name: str) -> str:
-        p = self._build_dir(build_id) / "logs" / sanitize_filename(name)
         try:
-            return p.read_text("utf-8", "replace")
-        except OSError:
+            return self.read_file(build_id, "logs/" + name)
+        except (KeyError, PermissionError):
             return ""
 
     def evidence(self, build_id: str, name: str) -> str:
+        """Return crash/phase evidence for `name`.
+
+        Test-phase evidence wins; otherwise fall back to the real file
+        (crash-reports/<name> or a bare hs_err file) so Pack Detail's Logs
+        tab shows actual crash contents, not an empty string (Issue 7).
+        """
         rec = self._read_record(build_id) or {}
         for ph in (rec.get("testResult") or {}).get("phases") or []:
             if ph.get("name") == name:
                 return ph.get("evidence") or ph.get("detail") or ""
-        return ""
+        try:
+            return self.read_file(build_id, "crash-reports/" + name)
+        except (KeyError, PermissionError):
+            pass
+        try:
+            return self.read_file(build_id, name)
+        except (KeyError, PermissionError):
+            return ""
 
     def worlds(self, build_id: str) -> list:
         gd = self._build_dir(build_id) / "instance" / "minecraft" / "saves"
@@ -347,7 +486,8 @@ class PyEngine:
                              "testMode": "standard"},
             "selections": [], "downloads": [], "graph": {"nodes": {}, "edges": []},
             "tests": [], "testResult": None, "conflicts": [], "repairs": [],
-            "exports": [], "packStats": {"modCount": 0}, "settings": self.settings_store.load(),
+            "exports": [], "packStats": {"modCount": 0}, "revision": 0,
+            "settings": self.settings_store.load(),
             "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
@@ -371,14 +511,54 @@ class PyEngine:
         self._write_record(rec)
         return {"ok": True}
 
+    def download_summary(self, limit: int = 120) -> dict:
+        """Global Download Manager query: active operations first, then the
+        most recent records across ALL packs — never an arbitrary first-N
+        window (Issue 25). One call replaces the per-pack N+1 scan.
+        """
+        idx = read_json_file(builds_dir() / "index.json") or []
+        if not isinstance(idx, list):
+            idx = []
+        ACTIVE = {"queued", "pending", "downloading", "verifying"}
+        rows = []
+        for s in idx:
+            bid = s.get("buildId", "")
+            rec = self._read_record(bid) or {}
+            name = rec.get("name") or s.get("name") or bid
+            for d in rec.get("downloads") or []:
+                st = str(d.get("status") or "ok").lower()
+                rows.append({
+                    "name": d.get("filename") or d.get("key") or "file",
+                    "provider": (d.get("key") or "").split(":")[0],
+                    "sizeBytes": d.get("sizeBytes") or 0,
+                    "sha1": d.get("sha1") or "",
+                    "status": st,
+                    "build": name,
+                    "buildId": bid,
+                    "error": d.get("error"),
+                    "at": d.get("at") or d.get("startedAt") or d.get("completedAt") or "",
+                })
+        rows.sort(key=lambda r: (r["status"] not in ACTIVE, r.get("at") or ""),
+                  reverse=False)
+        return {"rows": rows[:limit], "total": len(rows),
+                "active": sum(1 for r in rows if r["status"] in ACTIVE)}
+
     def set_ram(self, build_id: str, ram_gb: int) -> dict:
         rec = self._read_record(build_id)
         if not rec:
             raise KeyError("build not found")
-        rec.setdefault("requirements", {})["ramGB"] = int(ram_gb)
+        # Validate the limit (2–32 GB, matching the launcher's practical range)
+        # before it ever reaches a launch command line.
+        try:
+            gb = int(ram_gb)
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid RAM: {ram_gb!r}")
+        gb = max(2, min(32, gb))
+        rec.setdefault("requirements", {})["ramGB"] = gb
+        _bump_revision(rec)
         rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(rec)
-        return {"ok": True}
+        return {"ok": True, "ramGB": gb, "revision": rec["revision"]}
 
     def set_auto_relaunch(self, build_id: str, enabled: bool) -> dict:
         """Opt-in per-pack toggle: silently-dying games relaunch once with a
@@ -387,6 +567,7 @@ class PyEngine:
         if not rec:
             raise KeyError("build not found")
         rec.setdefault("settings", {})["autoRelaunch"] = bool(enabled)
+        _bump_revision(rec)
         rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(rec)
         return {"ok": True, "autoRelaunch": bool(enabled)}
@@ -472,6 +653,7 @@ class PyEngine:
             "slug": sh["project"]["slug"], "title": sh["project"]["title"],
             "reason": preset_info["reason"],
         }
+        _bump_revision(rec)
         rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(rec)
 
@@ -528,6 +710,7 @@ class PyEngine:
             cur["performanceTarget"].update(patch["performanceTarget"])
         rec["identity"] = cur
         rec["selections"] = apply_intents(rec.get("selections") or [], cur)
+        _bump_revision(rec)
         rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(rec)
         return {"ok": True, "identity": cur}
@@ -554,7 +737,14 @@ class PyEngine:
         return snap
 
     def restore_snapshot(self, build_id: str, snapshot_id: str, label: str = "") -> dict:
-        """Restore a snapshot into the pack (transactional, same promotion rules)."""
+        """Restore a snapshot into the pack — genuinely restorable.
+
+        Reconstructs the real instance (config content from the snapshot's
+        object store, mod/shader/resource-pack artifacts from recorded paths,
+        reacquiring from providers when a local file is missing), verifies
+        hashes, and only then promotes the candidate record. On any failure
+        the working pack is untouched and the failure is recorded.
+        """
         rec = self._read_record(build_id)
         if not rec:
             raise KeyError("build not found")
@@ -564,15 +754,110 @@ class PyEngine:
         # Protect the current working state first.
         self.create_snapshot(build_id, "Before restore: " + (snap.get("label") or snapshot_id))
         cand = restore_from_snapshot(self._build_dir(build_id), rec, snap)
-        self._write_record(cand)
+        try:
+            # 1) Reconstruct config content from the object store.
+            restore_config(self._build_dir(build_id), snap)
+            # 2) Reconstruct artifacts (mods/shaderpacks/resourcepacks) with
+            #    hash verification + legal reacquisition from providers.
+            missing = self._materialize_artifacts(build_id, snap)
+            if missing:
+                raise RuntimeError(
+                    "Snapshot references artifacts that could not be reacquired: "
+                    + ", ".join(missing[:5]))
+            # 3) Verify the restored config hashes against the manifest.
+            from .snapshots import _config_entries, _sha1
+            got = _config_entries(self._build_dir(build_id))
+            wanted = snap.get("configObjects") or {}
+            mismatch = [rel for rel, h in wanted.items() if got.get(rel) != h]
+            if mismatch:
+                raise RuntimeError(
+                    f"restored config hash mismatch for {len(mismatch)} file(s): "
+                    + ", ".join(mismatch[:5]))
+        except Exception as e:  # noqa: BLE001 — preserve the working pack
+            rec.setdefault("aiHistory", []).append({
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "op": "restore-failed", "snapshotId": snapshot_id,
+                "label": snap.get("label") or "", "reason": str(e),
+            })
+            rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._write_record(rec)
+            raise
+        # 4) Promote only after the physical state is verified.
+        _bump_revision(cand)
+        cand["testResult"] = None  # restored state is unvalidated until retested
         cand.setdefault("aiHistory", []).append({
             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "op": "restore", "snapshotId": snapshot_id,
             "label": snap.get("label") or "",
         })
+        cand["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(cand)
         return {"ok": True, "buildId": build_id, "snapshotId": snapshot_id,
                 "label": snap.get("label") or label}
+
+    def _materialize_artifacts(self, build_id: str, snap: dict) -> list:
+        """Restore mod/shader/resource-pack artifacts into the instance from
+        the snapshot's manifest. Returns the list of artifacts that could not
+        be obtained (legal reacquisition attempted)."""
+        from .snapshots import _sha1
+        gd = self._build_dir(build_id) / "instance" / "minecraft"
+        missing = []
+        providers = {p.name: p for p in build_providers(self.settings_store) if p.available}
+        for s in snap.get("selections") or []:
+            if not s.get("selected", True):
+                continue
+            art = s.get("artifact") or {}
+            if not art:
+                continue
+            ptype = s.get("projectType") or "mod"
+            sub = {"mod": "mods", "shader": "shaderpacks",
+                   "resourcepack": "resourcepacks"}.get(ptype, "mods")
+            dest = gd / sub / (art.get("filename") or sanitize_filename(
+                f"{s.get('slug') or s.get('key')}.jar", "restored.jar"))
+            src = Path(art.get("path") or "")
+            want_sha = art.get("sha1") or s.get("fileSha1") or ""
+            if src.is_file():
+                if want_sha and _sha1(src.read_bytes()).lower() != str(want_sha).lower():
+                    src = Path("")  # hash mismatch -> reacquire
+                else:
+                    mkdirp(dest.parent)
+                    shutil.copyfile(src, dest)
+                    continue
+            if dest.is_file():
+                if want_sha and _sha1(dest.read_bytes()).lower() == str(want_sha).lower():
+                    continue
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            # Legal reacquisition from the provider (hash-verified).
+            prov = providers.get(s.get("provider"))
+            reacquired = False
+            if prov and s.get("versionId") and want_sha:
+                try:
+                    versions = prov.get_versions(s.get("projectId"), {
+                        "minecraftVersion": (snap.get("requirements") or {}).get("minecraftVersion"),
+                        "loaders": [(snap.get("requirements") or {}).get("loader")],
+                    }) or []
+                    v = next((x for x in versions if x.get("versionId") == s.get("versionId")), None)
+                    f = None
+                    if v:
+                        fl = v.get("files") or []
+                        f = next((x for x in fl if (x.get("hashes") or {}).get("sha1", "").lower() == want_sha.lower()),
+                                 (fl[0] if fl else None))
+                    if f and f.get("url"):
+                        from .core import download_to_file
+                        mkdirp(dest.parent)
+                        download_to_file(f["url"], dest,
+                                         max_bytes=max((f.get("size") or 0) * 2 + 1024 * 1024, 5 * 1024 ** 2),
+                                         expected_sha1=want_sha or None, timeout_ms=300000,
+                                         headers=cf_download_headers(f["url"]))
+                        reacquired = True
+                except Exception:  # noqa: BLE001 — report as missing, not crash
+                    pass
+            if not reacquired:
+                missing.append(f"{s.get('title') or s.get('slug')} ({s.get('provider')})")
+        return missing
 
     def last_known_good(self, build_id: str) -> dict | None:
         rec = self._read_record(build_id)
@@ -677,72 +962,127 @@ class PyEngine:
             raise KeyError("build not found")
         # Protect the current state before anything happens.
         self.create_snapshot(build_id, "Before AI: " + (prompt or "")[:60], kind="before-ai-edit")
+        rec = self._attach_identity(rec)
+        # Frozen semantic + package state the candidate must start from: a
+        # conversational request mutates this pack, it does not rebuild it.
+        ctx = {
+            "parentBuildId": build_id,
+            "revision": int(rec.get("revision") or 0),
+            "requirements": rec.get("requirements") or {},
+            "selections": rec.get("selections") or [],
+            "identity": rec.get("identity"),
+            "graph": rec.get("graph"),
+            "shaderChoice": rec.get("shaderChoice"),
+            "resourcePackChoice": rec.get("resourcePackChoice"),
+            "perfEstimate": rec.get("perfEstimate"),
+            "testResult": rec.get("testResult"),
+            "settings": rec.get("settings"),
+        }
         candidate_id = self.start_build({
             "prompt": prompt, "parentBuildId": build_id, "candidateOf": build_id,
             "name": (rec.get("name") or "Untitled") + " (AI candidate)",
+            "mutationContext": ctx,
         })
         return {"ok": True, "buildId": build_id, "candidateBuildId": candidate_id}
 
-    def _promote_candidate(self, parent_id: str, cand: dict) -> None:
-        """Merge a validated candidate build into its parent record.
+    # Application-managed directories promoted from a candidate with EXACT
+    # parity. Config is managed too, but its parity rule is copy-over (never
+    # delete) so user-tuned config files that only exist in the parent survive.
+    MANAGED_INSTANCE_DIRS = ("mods", "shaderpacks", "resourcepacks")
 
-        Only selections/graph/test evidence and the identity are copied — the
-        parent keeps its own build dir, name, and history. Never called on a
-        failed candidate.
+    def _promote_candidate(self, parent_id: str, cand: dict) -> None:
+        """Merge a validated candidate build into its parent record — fail-closed.
+
+        The parent record is only written AFTER the physical instance sync has
+        succeeded, so a mid-promotion failure can never leave the parent's
+        metadata describing files it does not have. On failure the parent stays
+        byte-identical (except a promote-failed history entry) and the candidate
+        remains available for diagnosis.
         """
         parent = self._read_record(parent_id)
         if not parent:
-            return
+            raise KeyError(f"parent {parent_id} not found")
         req = cand.get("requirements") or {}
-        parent["requirements"] = req
-        parent["selections"] = apply_intents(cand.get("selections") or [],
+        # Build the full new parent state first — no disk writes until the
+        # physical promotion has succeeded.
+        merged = dict(parent)
+        merged["requirements"] = req
+        merged["selections"] = apply_intents(cand.get("selections") or [],
                                               cand.get("identity") or derive_identity(req, cand))
-        parent["identity"] = cand.get("identity") or derive_identity(req, cand)
-        parent["graph"] = cand.get("graph")
-        parent["testResult"] = cand.get("testResult")
-        parent["packStats"] = cand.get("packStats") or {}
-        parent["shaderChoice"] = cand.get("shaderChoice")
-        parent["resourcePackChoice"] = cand.get("resourcePackChoice")
-        parent["perfEstimate"] = cand.get("perfEstimate")
-        parent["repairs"] = cand.get("repairs") or []
-        parent.setdefault("aiHistory", []).append({
+        merged["identity"] = cand.get("identity") or derive_identity(req, cand)
+        merged["graph"] = cand.get("graph")
+        merged["testResult"] = cand.get("testResult")
+        merged["packStats"] = cand.get("packStats") or {}
+        merged["shaderChoice"] = cand.get("shaderChoice")
+        merged["resourcePackChoice"] = cand.get("resourcePackChoice")
+        merged["perfEstimate"] = cand.get("perfEstimate")
+        merged["repairs"] = cand.get("repairs") or []
+        merged.setdefault("aiHistory", []).append({
             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "op": "promote", "fromBuildId": cand.get("buildId"),
             "label": (cand.get("request") or "AI change")[:80],
             "testStatus": (cand.get("testResult") or {}).get("status"),
             "modCount": (cand.get("packStats") or {}).get("modCount"),
         })
-        parent["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        # Sync the validated instance (mods/shaderpacks/resourcepacks) from the
-        # candidate build dir into the parent so Play runs the new state.
+        merged["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # Physical promotion first — a failure here must NOT touch the parent.
         try:
             self._sync_candidate_instance(parent_id, cand)
-        except Exception:  # noqa: BLE001
-            pass
-        self._write_record(parent)
+        except Exception as e:  # noqa: BLE001 — re-raised after recording
+            parent.setdefault("aiHistory", []).append({
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "op": "promote-failed", "fromBuildId": cand.get("buildId"),
+                "label": (cand.get("request") or "AI change")[:80],
+                "reason": f"instance sync failed: {e}",
+            })
+            parent["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._write_record(parent)
+            raise
+        _bump_revision(merged)
+        self._write_record(merged)
         # A promoted pack that validated is the new Last Known Good.
-        try:
-            mark_last_known_good(self._build_dir(parent_id), self._attach_identity(parent))
-        except Exception:  # noqa: BLE001
-            pass
+        mark_last_known_good(self._build_dir(parent_id), self._attach_identity(merged))
 
     def _sync_candidate_instance(self, parent_id: str, cand: dict) -> None:
-        """Copy the candidate build's installed mods/visuals into the parent."""
+        """Make the parent's managed instance directories match the candidate
+        exactly: stale files are removed, candidate files copied in, and any
+        copy failure aborts the promotion (raises). Never touches worlds,
+        screenshots or other user data."""
         cand_inst = self._build_dir(cand["buildId"]) / "instance" / "minecraft"
         par_inst = self._build_dir(parent_id) / "instance" / "minecraft"
-        for sub in ("mods", "shaderpacks", "resourcepacks"):
+        for sub in self.MANAGED_INSTANCE_DIRS:
             src = cand_inst / sub
             dst = par_inst / sub
-            if not src.is_dir():
-                continue
             mkdirp(dst)
-            for f_ in src.iterdir():
-                if f_.name in (".keep",) or not f_.is_file():
-                    continue
-                try:
-                    shutil.copyfile(f_, dst / f_.name)
-                except OSError:
-                    continue
+            # A candidate without the directory means the parent's must be
+            # emptied too (exact parity, e.g. no shaders requested).
+            desired: set = set()
+            if src.is_dir():
+                desired = {f_.name for f_ in src.iterdir()
+                           if f_.is_file() and f_.name not in (".keep",)}
+            # Exact parity: a mod/shader/resource pack removed in the candidate
+            # must physically disappear from the parent.
+            for f_ in list(dst.iterdir()):
+                if f_.is_file() and f_.name not in (".keep",) and f_.name not in desired:
+                    try:
+                        f_.unlink()
+                    except OSError:
+                        continue
+            if src.is_dir():
+                for f_ in src.iterdir():
+                    if f_.is_file() and f_.name not in (".keep",):
+                        shutil.copyfile(f_, dst / f_.name)  # raises -> promotion aborts
+        # Config promotion: candidate config content replaces the parent's,
+        # copy-over only (never delete parent-only files — they may be user-tuned).
+        cfg_src = cand_inst / "config"
+        cfg_dst = par_inst / "config"
+        if cfg_src.is_dir():
+            mkdirp(cfg_dst)
+            for f_ in cfg_src.rglob("*"):
+                if f_.is_file():
+                    target = cfg_dst / f_.relative_to(cfg_src)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(f_, target)
 
     # ------------------------------------------------------------------
     # build pipeline
@@ -758,16 +1098,36 @@ class PyEngine:
             "requirements": {}, "selections": [], "downloads": [],
             "graph": {"nodes": {}, "edges": []}, "tests": [], "testResult": None,
             "conflicts": [], "repairs": [], "exports": [], "packStats": {},
+            "revision": 0,
             "settings": self.settings_store.load(),
             "perfEstimate": None, "finalReport": None, "error": None,
             "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        # Candidate builds (AI edits / transactional changes) know their parent
-        # so completion can promote a PASS or leave the parent untouched on FAIL.
+        # Candidate builds (AI edits / transactional changes) start from a frozen
+        # copy of the parent's semantic + package state (CandidateMutationContext)
+        # so a conversational request mutates the pack instead of rebuilding it.
         if req.get("candidateOf"):
             rec["candidateOf"] = req["candidateOf"]
             rec["parentBuildId"] = req.get("parentBuildId") or req["candidateOf"]
+            ctx = req.get("mutationContext") or {}
+            if ctx.get("requirements"):
+                rec["requirements"] = json.loads(json.dumps(ctx["requirements"]))
+            if ctx.get("identity"):
+                rec["identity"] = json.loads(json.dumps(ctx["identity"]))
+            if ctx.get("selections"):
+                rec["selections"] = json.loads(json.dumps(ctx["selections"]))
+            if ctx.get("graph"):
+                rec["graph"] = json.loads(json.dumps(ctx["graph"]))
+            if ctx.get("shaderChoice"):
+                rec["shaderChoice"] = json.loads(json.dumps(ctx["shaderChoice"]))
+            if ctx.get("resourcePackChoice"):
+                rec["resourcePackChoice"] = json.loads(json.dumps(ctx["resourcePackChoice"]))
+            rec["perfEstimate"] = json.loads(json.dumps(ctx["perfEstimate"])) if ctx.get("perfEstimate") else None
+            rec["mutationContext"] = {
+                "parentRevision": int(ctx.get("revision") or 0),
+                "requirements": json.loads(json.dumps(ctx.get("requirements") or {})),
+            }
         mkdirp(self._build_dir(build_id))
         self._write_record(rec)
         t = threading.Thread(target=self._run_build, args=(build_id, prompt, req), daemon=True)
@@ -829,8 +1189,48 @@ class PyEngine:
         build_cfg = settings.get("build") or {}
         # ---- interpret
         logger.stage("parse", "Parsing request…")
+        is_candidate = bool(req.get("candidateOf"))
         interp = interpret(prompt)
         r = interp["requirements"]
+        if is_candidate:
+            # A conversational edit is a DELTA on the frozen parent state, never
+            # a fresh interpretation: the parent's MC/loader/RAM/theme stay, its
+            # features are extended (not replaced), and its selections are
+            # preserved as locked seeds below. Removals come from the change
+            # planner's verb/mention analysis.
+            base = rec.get("requirements") or {}
+            merged_features = list(base.get("features") or [])
+            for f in r.get("features") or []:
+                fid = f["id"] if isinstance(f, dict) else f
+                if not any((x.get("id") if isinstance(x, dict) else x) == fid
+                           for x in merged_features):
+                    merged_features.append(f)
+            r["features"] = merged_features
+            if not r.get("theme") and base.get("theme"):
+                r["theme"] = base.get("theme")
+            if not r.get("notes") and base.get("notes"):
+                r["notes"] = base.get("notes")
+            for k in ("minecraftVersion", "loader", "ramGB", "packSize",
+                      "testMode", "multiplayer", "serverPack"):
+                if base.get(k) is not None and r.get(k) in (None, "auto"):
+                    r[k] = base.get(k)
+            if not r.get("shaders") and base.get("shaders"):
+                r["shaders"] = True
+            if not r.get("shaderQuality") and base.get("shaderQuality"):
+                r["shaderQuality"] = base.get("shaderQuality")
+            if not r.get("resourcePackResolution") and base.get("resourcePackResolution"):
+                r["resourcePackResolution"] = base.get("resourcePackResolution")
+            # Removal intent ("remove magic", "no more bosses"…).
+            removals: set = set()
+            try:
+                plan = plan_change(rec, prompt, self.hardware())
+                removals = set(plan.get("interpretation", {}).get("removeFeatures") or [])
+                if "shaders" in removals:
+                    r["shaders"] = False
+                    r["resourcePackResolution"] = 0
+            except Exception:  # noqa: BLE001 — best-effort; additions still apply
+                removals = set()
+            rec["_candidateRemovals"] = sorted(removals)
         if r.get("needsClarification"):
             raise RuntimeError("I need a little more direction before building. Name a theme or feature, such as cozy farming, magic, exploration, or performance.")
         # merge explicit request overrides (from the UI advanced settings)
@@ -882,6 +1282,40 @@ class PyEngine:
         features = r.get("features") or []
         seeds = []
         selected_projects = []
+        # Candidate edits: every unrelated parent selection is a locked,
+        # version-pinned seed so the solver preserves it unless the request
+        # explicitly removed its feature or a compatibility conflict forces a
+        # replacement (conflict resolution may still act on locked nodes).
+        if is_candidate:
+            removal_ids = set(rec.get("_candidateRemovals") or [])
+            seen_keys = set()
+            for s in rec.get("selections") or []:
+                if not s.get("selected", True):
+                    continue
+                s_features = s.get("featureIds") or []
+                if removal_ids & set(s_features):
+                    continue
+                if s.get("projectType") == "shader" and not r.get("shaders"):
+                    continue
+                key = f"{s.get('provider')}:{s.get('projectId')}"
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                proj = {
+                    "provider": s.get("provider"), "projectId": s.get("projectId"),
+                    "slug": s.get("slug"), "title": s.get("title"),
+                    "description": s.get("description") or "",
+                    "projectType": s.get("projectType") or "mod",
+                    "downloads": 0, "follows": 0, "dateCreated": "",
+                    "dateModified": "", "categories": [], "url": "",
+                }
+                seeds.append({
+                    "featureId": (s_features[0] if s_features else "preserved"),
+                    "provider": s.get("provider"), "projectId": s.get("projectId"),
+                    "project": proj, "reason": "Preserved from existing pack",
+                    "score": 100, "locked": True,
+                    "pinnedVersionId": s.get("versionId"),
+                })
         for f in features:
             fid = f["id"]
             # Shader packs are selected by the GPU-aware visuals step below
@@ -1791,9 +2225,21 @@ class PyEngine:
 
     def add_mod(self, build_id: str, provider: str, project_id: str,
                 version_id: str = None, type: str = None) -> dict:
+        """Dependency-safe manual add: duplicate-guarded, resolves the mod's
+        full dependency tree through the real solver, downloads + installs the
+        new files, invalidates stale test evidence, and kicks off a retest.
+        If a dependency cannot be resolved the pack is left untouched."""
         rec = self._read_record(build_id)
         if not rec:
             raise KeyError("build not found")
+        # Duplicate guard FIRST — before any provider/network call. One logical
+        # selection per provider+project; a second add offers the existing
+        # selection instead of duplicating the entry (and costs no network).
+        for s in rec.get("selections") or []:
+            if (s.get("selected", True)
+                    and s.get("provider") == provider
+                    and str(s.get("projectId")) == str(project_id)):
+                return {"ok": True, "alreadySelected": True, "selection": s, "added": s}
         providers = build_providers(self.settings_store)
         prov = next((p for p in providers if p.name == provider and p.available), None)
         if not prov:
@@ -1818,54 +2264,157 @@ class PyEngine:
         if not v:
             raise RuntimeError(f"No {mc}/{loader} version for {proj['title']}")
         f = next((x for x in v.get("files") or [] if x.get("primary")), (v.get("files") or [None])[0])
-        key = f"{proj['provider']}:{proj['projectId']}"
-        rec.setdefault("selections", [])
-        rec["selections"].append({
-            "key": key, "provider": proj["provider"], "projectId": proj["projectId"],
-            "slug": proj["slug"], "title": proj["title"], "description": proj.get("description", ""),
-            "projectType": proj.get("projectType", "mod") if not type else type,
-            "versionId": v["versionId"], "versionNumber": v.get("versionNumber"),
-            "filename": f.get("filename") if f else None, "featureIds": ["manual"],
-            "reason": "Added manually", "clientSide": proj.get("clientSide"),
-            "serverSide": proj.get("serverSide"), "selected": True,
+        logger = BuildLogger(build_id, self._build_dir(build_id))
+        logger.stage("resolve", "Resolving dependencies for manual add…")
+        # Preserve every existing selected mod (locked + version-pinned) and add
+        # the requested project; the solver then fills in required dependencies.
+        from .solver import resolve_pack
+        seeds = []
+        for s in rec.get("selections") or []:
+            if not s.get("selected", True) or s.get("projectType") != "mod":
+                continue
+            if not s.get("provider") or not s.get("projectId"):
+                continue
+            seeds.append({
+                "featureId": (s.get("featureIds") or ["preserved"])[0],
+                "provider": s["provider"], "projectId": s["projectId"],
+                "project": {"provider": s["provider"], "projectId": s["projectId"],
+                             "slug": s.get("slug"), "title": s.get("title"),
+                             "description": s.get("description") or "",
+                             "projectType": s.get("projectType", "mod"),
+                             "downloads": 0, "follows": 0, "dateCreated": "",
+                             "dateModified": "", "categories": [], "url": ""},
+                "reason": "Preserved from existing pack", "score": 100,
+                "locked": True, "pinnedVersionId": s.get("versionId"),
+            })
+        seeds.append({
+            "featureId": "manual", "provider": proj["provider"],
+            "projectId": proj["projectId"], "project": proj,
+            "reason": "Added manually", "score": 100, "locked": True,
+            "pinnedVersionId": v["versionId"],
         })
-        # download the jar if allowed
-        if f and f.get("url"):
-            from .core import download_to_file
-            dest = self._build_dir(build_id) / "downloads" / "mods" / sanitize_filename(f"{proj['slug']}-{v['versionNumber']}.jar", "mod.jar")
-            if not dest.exists():
-                download_to_file(f["url"], dest, max_bytes=max((f.get("size") or 0) * 2 + 1024 * 1024, 5 * 1024 ** 2),
-                                 expected_sha1=(f.get("hashes") or {}).get("sha1"), timeout_ms=300000,
-                                 headers=cf_download_headers(f["url"]))
-            rec["selections"][-1]["downloadPath"] = str(dest)
-            # install into instance
-            mods_dir = self._build_dir(build_id) / "instance" / "minecraft" / "mods"
-            mkdirp(mods_dir)
-            shutil.copyfile(dest, mods_dir / sanitize_filename(proj["slug"] + ".jar", "mod.jar"))
+        res = resolve_pack({"providers": providers, "seeds": seeds,
+                            "minecraftVersion": mc, "loader": loader, "logger": logger})
+        errors = [i for i in res.get("issues") or [] if i.get("severity") == "error"]
+        if errors:
+            raise RuntimeError(
+                "Dependencies could not be resolved: "
+                + "; ".join(i.get("message", "?") for i in errors[:3]))
+        # Download only the new/changed files (existing ones are hash-skipped).
+        logger.stage("download", "Downloading new files…")
+        from .downloads import download_pack_files
+        selected = [n for n in res["graph"]["nodes"].values() if n.get("selected")]
+        dl = download_pack_files(selected, str(self._build_dir(build_id) / "downloads"),
+                                 {"logger": logger, "maxTotalDownloadMB": 600})
+        # Install jars into the instance (exact parity with the new graph).
+        from .instance import install_mod_jars
+        mods_dir = self._build_dir(build_id) / "instance" / "minecraft" / "mods"
+        mkdirp(mods_dir)
+        jars = [{"slug": n["project"]["slug"], "path": dl["fileByKey"][n["key"]]}
+                for n in selected
+                if n["key"] in dl["fileByKey"]
+                and n["project"].get("projectType", "mod") == "mod"]
+        install_mod_jars(mods_dir, jars, logger)
+        # Rebuild selections from the resolved graph (same shape as the pipeline).
+        selections = []
+        for n in res["graph"]["nodes"].values():
+            if not n.get("selected"):
+                continue
+            nv = n.get("version") or {}
+            nf = (nv.get("files") or [None])[0] if nv.get("files") else None
+            selections.append({
+                "key": n["key"], "provider": n["project"]["provider"],
+                "projectId": n["project"]["projectId"], "slug": n["project"]["slug"],
+                "title": n["project"]["title"],
+                "description": n["project"].get("description", ""),
+                "projectType": n["project"].get("projectType", "mod"),
+                "versionId": nv.get("versionId"), "versionNumber": nv.get("versionNumber"),
+                "filename": nf.get("filename") if nf else None,
+                "featureIds": n.get("featureIds") or [], "reason": n.get("reason"),
+                "score": n.get("rankScore"),
+                "clientSide": n["project"].get("clientSide"),
+                "serverSide": n["project"].get("serverSide"),
+                "downloadPath": dl["fileByKey"].get(n["key"]),
+                "selected": True,
+            })
+        rec["selections"] = selections
+        rec["graph"] = res["graph"]
+        rec["downloads"] = dl["records"]
+        rec["packStats"] = {"modCount": len([s for s in selections if s["projectType"] == "mod"]),
+                             "projectCount": len(res["graph"]["nodes"]),
+                             "downloadMB": round(dl["totalBytes"] / 1024 ** 2, 1)}
+        rec["testResult"] = None  # stale evidence must never describe this pack
+        _bump_revision(rec)
         rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_record(rec)
-        return {"ok": True, "added": rec["selections"][-1]}
+        # Validate the mutation with a real retest (async — promotion only on PASS).
+        self.retest(build_id)
+        return {"ok": True, "added": selections[-1],
+                "modCount": rec["packStats"]["modCount"], "revision": rec["revision"]}
 
     def remove_mod(self, build_id: str, slug: str, type: str = None) -> dict:
         rec = self._read_record(build_id)
         if not rec:
             raise KeyError("build not found")
-        changed = False
+        target = None
         for s in rec.get("selections") or []:
-            if s.get("slug") == slug and s.get("selected", True):
-                s["selected"] = False
-                changed = True
-        if changed:
-            from .instance import remove_jar
-            remove_jar(self._build_dir(build_id) / "instance" / "minecraft" / "mods", slug)
-            rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self._write_record(rec)
-        return {"ok": True, "removed": changed}
+            if s.get("slug") == slug and s.get("selected", True) \
+                    and (type is None or s.get("projectType") == type):
+                target = s
+                break
+        if not target:
+            return {"ok": True, "removed": False, "dependents": []}
+        tkey = f"{target.get('provider')}:{target.get('projectId')}"
+        # Dependency impact: which still-selected mods require the removed one.
+        graph = rec.get("graph") or {"nodes": {}, "edges": []}
+        selected_keys = {f"{s.get('provider')}:{s.get('projectId')}"
+                         for s in rec.get("selections") or []
+                         if s.get("selected", True) and s.get("provider") and s.get("projectId")}
+        selected_keys.discard(tkey)
+        dependents = []
+        for e in graph.get("edges") or []:
+            if e.get("to") == tkey and e.get("from") in selected_keys:
+                n = (graph.get("nodes") or {}).get(e["from"]) or {}
+                title = (n.get("project") or {}).get("title") or e["from"]
+                if title not in dependents:
+                    dependents.append(title)
+        if dependents:
+            return {"ok": False, "blocked": True, "removed": False,
+                    "dependents": dependents,
+                    "message": "Removing " + (target.get("title") or slug)
+                                + " would also break: " + ", ".join(dependents[:6])}
+        from .instance import remove_jar
+        remove_jar(self._build_dir(build_id) / "instance" / "minecraft" / "mods", slug)
+        target["selected"] = False
+        node = (graph.get("nodes") or {}).get(tkey)
+        if node is not None:
+            node["selected"] = False
+        rec["graph"] = graph
+        rec["packStats"] = {"modCount": len([s for s in rec.get("selections") or []
+                                               if s.get("selected", True) and s.get("projectType") == "mod"]),
+                             "projectCount": len(graph.get("nodes") or {}),
+                             "downloadMB": (rec.get("packStats") or {}).get("downloadMB", 0)}
+        rec["testResult"] = None  # never leave an old PASS badge on a modified pack
+        _bump_revision(rec)
+        rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._write_record(rec)
+        return {"ok": True, "removed": True, "dependents": [], "revision": rec["revision"]}
 
     def retest(self, build_id: str) -> dict:
         rec = self._read_record(build_id)
         if not rec:
             raise KeyError("build not found")
+        # Stale evidence from a previous revision must never look current while
+        # the new test runs. The record flips to TESTING before the thread
+        # starts, and the thread re-reads the record at completion (Issue 10).
+        revision = int(rec.get("revision") or 0)
+        tr = rec.get("testResult") or {}
+        tr["status"] = "TESTING"
+        tr["testedRevision"] = revision
+        rec["testResult"] = tr
+        rec["status"] = "testing"
+        rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._write_record(rec)
         logger = BuildLogger(build_id, self._build_dir(build_id))
         req = rec.get("requirements") or {}
         settings = rec.get("settings") or {}
@@ -1894,28 +2443,55 @@ class PyEngine:
             "autoInstallJava": settings.get("autoInstallJava", True),
         }
         graph = rec.get("graph") or {"nodes": {}, "edges": []}
-        t = threading.Thread(target=lambda: self._run_retest(build_id, rec, env, graph), daemon=True)
+        t = threading.Thread(target=lambda: self._run_retest(build_id, revision, env, graph), daemon=True)
         t.start()
         return {"ok": True, "buildId": build_id}
 
-    def _run_retest(self, build_id, rec, env, graph):
+    def _run_retest(self, build_id, tested_revision: int, env, graph):
         logger = BuildLogger(build_id, self._build_dir(build_id))
+        result = None
         try:
-            test_result = run_test_level(env, graph)
-            rec["testResult"] = test_result
-            rec["tests"] = rec.get("tests") or []
-            rec["tests"].append(test_result)
-            rec["status"] = "done" if test_result["status"] == "PASS" else "failed"
-            rec["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self._write_record(rec)
-            if test_result["status"] == "PASS":
-                try:
-                    mark_last_known_good(self._build_dir(build_id),
-                                         self._attach_identity(self._read_record(build_id) or rec))
-                except Exception:  # noqa: BLE001
-                    pass
-        except Exception as e:
+            result = run_test_level(env, graph)
+        except Exception as e:  # noqa: BLE001 — infrastructure failure is a real ERROR result
             logger.error("test", f"Retest failed: {e}")
+            result = {
+                "status": "ERROR", "level": env.get("testMode") or "standard",
+                "testedRevision": tested_revision,
+                "errorType": "TestInfrastructureError",
+                "message": str(e), "summary": f"Test infrastructure error: {e}",
+                "phases": [{"name": "system", "status": "ERROR", "detail": str(e)[:300]}],
+                "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "completedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        # Re-read the LATEST record: if the pack changed while the test ran, the
+        # result belongs to the old revision only — never overwrite newer state.
+        latest = self._read_record(build_id) or {}
+        current_rev = int(latest.get("revision") or 0)
+        if current_rev != tested_revision:
+            history = latest.get("tests") or []
+            history.append({**result, "stale": True, "testedRevision": tested_revision,
+                            "currentRevision": current_rev})
+            latest["tests"] = history[-50:]
+            self._write_record(latest)
+            logger.warn("test",
+                        f"Retest result for revision {tested_revision} is stale "
+                        f"(pack now at {current_rev}); record untouched")
+            return
+        status = result.get("status")
+        result["testedRevision"] = tested_revision
+        latest["testResult"] = result
+        history = latest.get("tests") or []
+        history.append(result)
+        latest["tests"] = history[-50:]
+        latest["status"] = "done" if status == "PASS" else "failed"
+        latest["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._write_record(latest)
+        if status == "PASS":
+            try:
+                mark_last_known_good(self._build_dir(build_id),
+                                     self._attach_identity(latest))
+            except Exception:  # noqa: BLE001
+                pass
 
     # ------------------------------------------------------------------
     # launcher
@@ -1995,6 +2571,14 @@ class PyEngine:
         rec["repairs"] = rec.get("repairs") or []
         rec["repairs"].append(action)
         self._write_record(rec)
+        # A crashed game often leaves its JVM alive (Forge fatal-error dialog),
+        # so the stale pid guard in launch_pack would reject the promised
+        # relaunch with "Pack is already running". Terminate it so the caller's
+        # play() starts a genuinely fresh instance.
+        try:
+            stop_pack(build_id)
+        except Exception:  # noqa: BLE001 — best effort; play() reports any real failure
+            pass
         return {"ok": True, "added": missing, "relaunch": True}
 
     def backup(self, build_id: str) -> dict:
@@ -2060,10 +2644,16 @@ class PyEngine:
                          headers=cf_download_headers(f["url"]))
         if progress:
             progress("Downloading modpack archive", 1, 1)
-        if provider == "modrinth":
-            res = import_mrpack(rec, archive_path, bdir, prov, progress=progress, cancel=cancel)
-        else:
-            res = import_curseforge(rec, archive_path, bdir, prov, progress=progress, cancel=cancel)
+        try:
+            if provider == "modrinth":
+                res = import_mrpack(rec, archive_path, bdir, prov, progress=progress, cancel=cancel)
+            else:
+                res = import_curseforge(rec, archive_path, bdir, prov, progress=progress, cancel=cancel)
+        except Exception:
+            # A failed/malicious archive must never leave a half-imported pack
+            # behind; the partial build dir is removed before re-raising.
+            self.delete_pack(rec["buildId"])
+            raise
         return self._finalize_import(rec, res)
 
     def import_file(self, local_path: str, name: str = None,
@@ -2081,10 +2671,14 @@ class PyEngine:
         rec = self.create_pack(name=name or p.stem)
         rec["request"] = f"Imported {p.name}"
         bdir = self._build_dir(rec["buildId"])
-        if kind == "mrpack":
-            res = import_mrpack(rec, p, bdir, prov, progress=progress, cancel=cancel)
-        else:
-            res = import_curseforge(rec, p, bdir, prov, progress=progress, cancel=cancel)
+        try:
+            if kind == "mrpack":
+                res = import_mrpack(rec, p, bdir, prov, progress=progress, cancel=cancel)
+            else:
+                res = import_curseforge(rec, p, bdir, prov, progress=progress, cancel=cancel)
+        except Exception:
+            self.delete_pack(rec["buildId"])
+            raise
         return self._finalize_import(rec, res)
 
     def _finalize_import(self, rec: dict, res: dict) -> dict:

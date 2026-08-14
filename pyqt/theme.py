@@ -593,6 +593,17 @@ QPushButton[cls="pill"][active="true"] {{
     border: 1px solid rgba(57,184,106,0.4);
     font-weight: 700;
 }}
+QPushButton[cls="pill-link"] {{
+    background: transparent;
+    color: {BLUE};
+    border: 1px solid transparent;
+    border-radius: {R_MD}px;
+    padding: 3px 8px;
+    font-family: "{MONO}";
+    font-size: 11px;
+    text-align: left;
+}}
+QPushButton[cls="pill-link"]:hover {{ color: {TEXT}; background: {HOVER2}; border: 1px solid {BORDER}; }}
 QPushButton[cls="source-pill"] {{
     background: {HOVER};
     color: {TEXT2};

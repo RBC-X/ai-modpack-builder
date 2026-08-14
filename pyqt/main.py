@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
         self.account_modal = AccountModal(self)
         self.import_modal = ImportModal(self)
         self.new_pack_dialog = NewPackDialog(self)
-        self.launch_overlay = LaunchOverlay(self)
+        self.launch_overlay = LaunchOverlay(self, api)
         self.import_overlay = ImportOverlay(self)
         self.crash_drawer = CrashDrawer(self, api)
         self._palette: QDialog | None = None
@@ -880,8 +880,11 @@ class MainWindow(QMainWindow):
         perf = rec.get("perfEstimate") or {}
         sel = rec.get("selections") or []
         nodes = ((rec.get("graph") or {}).get("nodes") or {})
-        icon_url = None
-        cover_url = rec.get("coverUrl") or None
+        # Summary records now carry cover/icon for EVERY pack (Issue 24), so
+        # the full-record fetch only adds gallery-grade detail — never blanks
+        # the presentation of packs beyond the enrich window.
+        icon_url = b.get("iconUrl") or None
+        cover_url = rec.get("coverUrl") or b.get("coverUrl") or None
         for s in sel[:6]:
             key = s.get("key") or f"{s.get('provider')}:{s.get('projectId')}"
             project = (nodes.get(key) or {}).get("project") or {}
@@ -900,8 +903,8 @@ class MainWindow(QMainWindow):
             if icon_url and cover_url:
                 break
         cover_url = cover_url or icon_url
-        mc_version = reqs.get("minecraftVersion") or ""
-        loader_name = reqs.get("loader") or ""
+        mc_version = reqs.get("minecraftVersion") or b.get("minecraftVersion") or ""
+        loader_name = reqs.get("loader") or b.get("loader") or ""
         raw_description = rec.get("request") or rec.get("finalReport") or ""
         if str(raw_description).lower().startswith("import:"):
             count = b.get("modCount") or len(sel)
@@ -912,8 +915,9 @@ class MainWindow(QMainWindow):
         else:
             display_description = raw_description
         perf_load = perf.get("load") or ""
-        hardware_fit = f"{str(perf_load).title()} load" if perf_load else ""
-        ram_target = f"{reqs.get('ramGB')} GB RAM target" if reqs.get("ramGB") else "Hardware detected"
+        hardware_fit = f"{str(perf_load).title()} load" if perf_load else (b.get("hardwareFit") or "")
+        ram_target = (f"{reqs.get('ramGB')} GB RAM target" if reqs.get("ramGB")
+                      else b.get("ramTarget") or ("Hardware detected" if not reqs else ""))
         return {
             **b,
             "name": b.get("name") or rec.get("name"),
@@ -1054,9 +1058,29 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _set_nav(self, nav: str) -> None:
         if nav == "settings":
-            self._settings_return_nav = self.active_nav
+            # Settings is a floating overlay, never a QStackedWidget page:
+            # remember the route it covers, keep the stack untouched, and do
+            # not route it through _open_detail(). Closing restores the
+            # underlying page via _close_settings().
+            if self.active_nav != "settings":
+                self._settings_return_nav = self.active_nav
+            self.active_nav = nav
+            self._paint_nav(nav)
+            self.settings.show_overlay()
+            return
         self.active_nav = nav
         self._open_detail(None)
+        self._paint_nav(nav)
+        self.stack.setCurrentWidget(getattr(self, ATTR_BY_NAV[nav]))
+        # Downloads/Activity refresh from their real showEvent when the stack
+        # shows them — never invoke the lifecycle event manually.
+        # Packs must be current the moment the user looks: Home and Library
+        # re-read the engine's on-disk index on arrival (async, non-blocking)
+        # instead of waiting up to 20 s for the background refresh timer.
+        if nav in ("home", "library"):
+            self.refresh_builds()
+
+    def _paint_nav(self, nav: str) -> None:
         icon_by_id = {nid: nicon for nid, _nlabel, nicon in NAV}
         for nid, (frame, indicator, ic, nav_label) in self.nav_btns.items():
             active = nid == nav
@@ -1071,19 +1095,6 @@ class MainWindow(QMainWindow):
             theme.polish(nav_label)
         if nav != "settings":
             self._title.setText(TITLES.get(nav, nav.title()))
-        if nav == "settings":
-            # Floating surface on top of the current page — the stack keeps
-            # showing whatever was underneath.
-            self.settings.show_overlay()
-        else:
-            self.stack.setCurrentWidget(getattr(self, ATTR_BY_NAV[nav]))
-            if nav in ("downloads", "activity"):
-                getattr(self, ATTR_BY_NAV[nav]).showEvent(None)
-        # Packs must be current the moment the user looks: Home and Library
-        # re-read the engine's on-disk index on arrival (async, non-blocking)
-        # instead of waiting up to 20 s for the background refresh timer.
-        if nav in ("home", "library"):
-            self.refresh_builds()
 
     def open_detail(self, build_id: str) -> None:
         self._open_detail(build_id)
@@ -1126,7 +1137,7 @@ class MainWindow(QMainWindow):
         self._launching = build_id
         self._launch_ui_applied = False
         name = next((b.get("name") for b in self.builds if b.get("buildId") == build_id), "pack")
-        self.launch_overlay.show_launch(name)
+        self.launch_overlay.show_launch(name, build_id)
         self.toast(f"Launching {name}…")
 
         def fetch():
@@ -1219,7 +1230,7 @@ class MainWindow(QMainWindow):
             return
         self.crash_drawer.hide()
         self.toast("Adding missing mods & relaunching…")
-        self.launch_overlay.show_launch("repair")
+        self.launch_overlay.show_launch("repair", bid)
 
         def fetch():
             username, auth = self._launch_identity()
@@ -1227,6 +1238,11 @@ class MainWindow(QMainWindow):
 
         def ok(res):
             self.toast(res.get("summary") or "Dependencies added — relaunching.")
+            if res.get("relaunch"):
+                # add_missing terminated the stale crashed JVM; honour the
+                # button label and actually start the game again.
+                self.play(bid)
+                return
             self._launching = bid
             self._poll.start()
             self.refresh_builds()
@@ -1239,7 +1255,7 @@ class MainWindow(QMainWindow):
 
     def repair(self, build_id: str) -> None:
         self.toast("Running full repair & relaunch (crash logs → root cause → fix → retest)…")
-        self.launch_overlay.show_launch("repair scan")
+        self.launch_overlay.show_launch("repair scan", build_id)
         self._launching = build_id
 
         def fetch():

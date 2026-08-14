@@ -22,6 +22,7 @@ from .mojang import (resolve_mojang_version, install_minecraft,
                      build_launch_command)
 from .loader import install_fabric_or_quilt, install_forge
 from .instance_java import detect_java, auto_install_java, java_for
+from .core import sanitize_filename  # noqa: E402
 from .instance import (collect_instance_logs, install_mod_jars,
                        install_resource_packs, install_shader_packs,
                        write_server_configs, write_client_options,
@@ -33,6 +34,25 @@ from .repair import (parse_latest_log, parse_crash_report, main_menu_reached,
 from .core import version_satisfies
 
 _IS_WIN = sys.platform == "win32"
+
+
+def _free_gb() -> float:
+    """Free physical RAM (Windows GlobalMemoryStatusEx / 0 on other platforms)."""
+    if _IS_WIN:
+        import ctypes
+        class _MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        try:
+            m = _MS(); m.dwLength = ctypes.sizeof(_MS)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+                return round(m.ullAvailPhys / 1024 ** 3, 2)
+        except Exception:
+            pass
+    return 0.0
 
 
 def major_of(mc: str) -> int:
@@ -254,7 +274,7 @@ def launch_client(env: dict, assembled: dict, opts: dict) -> dict:
     poller.start()
     result = run_process({
         "cmd": args[0], "args": args[1:], "cwd": game_dir,
-        "timeoutMs": opts.get("timeoutMs", 420000),
+        "timeoutMs": opts.get("timeoutMs", _launch_timeout_ms(env)),
         "log": log["write"], "name": f"mc-{opts['label']}", "watchFor": watch,
     })
     stop_event.set()
@@ -334,6 +354,42 @@ def _finish(level, status, started, phases, log_files, summary) -> dict:
             "phases": phases, "logFiles": log_files, "summary": summary}
 
 
+def _launch_timeout_ms(env: dict) -> int:
+    """Per-launch wall-clock cap; harness knob AMB_LAUNCH_TIMEOUT_MS (default
+    420 s = 7 min) so constrained boxes can give the pack more time under
+    memory pressure (the 155-mod pack's resource loading crawled past 7 min
+    at ~0.9 GB free)."""
+    try:
+        return max(120000, int(os.environ.get("AMB_LAUNCH_TIMEOUT_MS", "420000")))
+    except ValueError:
+        return 420000
+
+
+def _mods_installed(env: dict) -> bool:
+    """True when every expected mod jar already sits in the instance mods dir
+    with a matching size, so the tester can skip the 2-3 GB re-install that
+    otherwise dirties the Windows page cache right before each launch."""
+    mods_dir = Path(env["gameDir"]) / "mods"
+    if not mods_dir.is_dir():
+        return False
+    seen = set()
+    for jar in env.get("modJars") or []:
+        src = Path(jar["path"])
+        if not src.exists():
+            continue
+        name = sanitize_filename(jar["slug"] + ".jar", "mod.jar")
+        if name in seen:
+            continue
+        seen.add(name)
+        dst = mods_dir / name
+        try:
+            if not dst.exists() or dst.stat().st_size != src.stat().st_size:
+                return False
+        except OSError:
+            return False
+    return bool(seen)
+
+
 def run_standard_test(env: dict, graph: dict) -> dict:
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     phases = []
@@ -345,14 +401,23 @@ def run_standard_test(env: dict, graph: dict) -> dict:
     ph("instance", "RUNNING", "Creating isolated instance…")
     try:
         mods_dir = Path(env["gameDir"]) / "mods"
-        shutil.rmtree(mods_dir, ignore_errors=True)
+        # Per-run isolation: logs and crash-reports are always cleared so a
+        # stale report can never masquerade as this run's evidence.
         shutil.rmtree(Path(env["gameDir"]) / "crash-reports", ignore_errors=True)
         shutil.rmtree(Path(env["gameDir"]) / "logs", ignore_errors=True)
-        install_mod_jars(mods_dir, env["modJars"], env["logger"])
-        install_resource_packs(Path(env["gameDir"]) / "resourcepacks", env.get("resourcePackFiles") or [], env["logger"])
-        install_shader_packs(Path(env["gameDir"]) / "shaderpacks", env.get("shaderFiles") or [], env["logger"])
-        write_client_options(env["gameDir"], {"renderDistance": 6})
-        ph("instance", "PASS", "Mods and packs installed into isolated instance")
+        # Skip the 2-3 GB jar re-install when every expected mod is already
+        # present with a matching size: the rewrite dirties the Windows page
+        # cache right as the JVM starts growing and starves it on low-RAM
+        # boxes (the game's clean exit-0 with no crash report).
+        if _mods_installed(env):
+            ph("instance", "PASS", "Instance mods already present — skipping 2-3 GB re-install")
+        else:
+            shutil.rmtree(mods_dir, ignore_errors=True)
+            install_mod_jars(mods_dir, env["modJars"], env["logger"])
+            install_resource_packs(Path(env["gameDir"]) / "resourcepacks", env.get("resourcePackFiles") or [], env["logger"])
+            install_shader_packs(Path(env["gameDir"]) / "shaderpacks", env.get("shaderFiles") or [], env["logger"])
+            write_client_options(env["gameDir"], {"renderDistance": 6})
+            ph("instance", "PASS", "Mods and packs installed into isolated instance")
     except Exception as e:
         ph("instance", "FAIL", f"Instance assembly failed: {e}")
         return _finish("standard", "FAIL", started, phases, log_files, "Instance assembly failed")
@@ -366,7 +431,7 @@ def run_standard_test(env: dict, graph: dict) -> dict:
 
     ph("launch", "RUNNING", "Starting Minecraft…")
     try:
-        res = launch_client(env, assembled, {"label": "standard", "watchFor": "menu", "timeoutMs": 420000})
+        res = launch_client(env, assembled, {"label": "standard", "watchFor": "menu", "timeoutMs": _launch_timeout_ms(env)})
         log_files.append("launch-standard.log")
         all_lines = list(res["latest"]) + list(res["console"])
         crash = parse_latest_log(all_lines)
@@ -411,6 +476,114 @@ def parse_gc_peak(gc_log: list):
     return f"{best} MB" if best > 0 else None
 
 
+def move_server_world_to_saves(game_dir) -> bool:
+    """Move the vanilla server's top-level world/ into saves/ for client
+    quickplay.
+
+    Robustly handles a stale saves/world left by an interrupted or concurrent
+    run: Windows cannot replace a still-present directory (WinError 183), so
+    the stale dir is removed, else renamed aside, and the copy fallback merges
+    into the destination (dirs_exist_ok) even when a locked file blocks every
+    delete. Returns True if a world was moved, False otherwise.
+    """
+    world_src = Path(game_dir) / "world"
+    world_dst = Path(game_dir) / "saves" / "world"
+    if not world_src.exists():
+        return False
+    if world_dst.exists():
+        shutil.rmtree(world_dst, ignore_errors=True)
+        if world_dst.exists():
+            stale = Path(game_dir) / "saves" / f"world-stale-{int(time.time())}"
+            try:
+                world_dst.rename(stale)
+            except OSError:
+                shutil.rmtree(world_dst, ignore_errors=True)
+    try:
+        world_src.rename(world_dst)
+    except OSError:
+        shutil.copytree(world_src, world_dst, dirs_exist_ok=True)
+        shutil.rmtree(world_src, ignore_errors=True)
+    return True
+
+
+def _settle_before_launch(env: dict, what: str) -> float:
+    """Wait for a just-killed JVM's pages to actually be reclaimed.
+
+    Every deep phase taskkills its process tree when its watched condition is
+    met, but Windows reclamation is asynchronous: a killed JVM's dirty pages
+    sit in the modified list and only move to standby/free (ullAvailPhys) as
+    the writeback completes. On a RAM-constrained box the next client can
+    spawn while that is still happening, starving the new heap (the
+    mixin-transformer NPE on the 155-mod pack's reproducibility launch).
+
+    Instead of a fixed sleep, poll free RAM and settle until it plateaus —
+    measuring how long Windows actually takes on THIS machine. The floor is
+    env['phaseGapSec'] (default 10 s, the harness knob that previously was a
+    fixed wait); the hard cap env['maxSettleSec'] (default 120 s) prevents a
+    hang when something else keeps allocating. Records every actual gap in
+    env['settleSecs'] and returns the gap used.
+    """
+    floor = float(env.get("phaseGapSec") or 10)
+    cap = float(env.get("maxSettleSec") or 120)
+    poll = 2.0
+    t0 = time.time()
+    prev = _free_gb()
+    stable = 0
+    gap = floor
+    while True:
+        time.sleep(poll)
+        free = _free_gb()
+        elapsed = time.time() - t0
+        if free >= prev - 0.05:
+            if free - prev < 0.05:
+                stable += 1
+            else:
+                stable = 0
+        else:
+            stable = 0
+        prev = free
+        if elapsed >= cap:
+            gap = elapsed
+            break
+        if elapsed >= floor and stable >= 2:
+            gap = elapsed
+            break
+    env["logger"].info("test",
+                        f"Settled {int(gap)}s before {what} (free RAM {prev:.2f} GB — pages reclaimed)")
+    env["settleSecs"] = list(env.get("settleSecs") or []) + [round(gap, 1)]
+    return gap
+
+
+def deep_evidence_fields(phases: list, settle_secs: list | None = None,
+                         engine_version: str = "") -> dict:
+    """Extract engine facts from real deep-test phase detail strings.
+
+    Pure function (no I/O) so the evidence record is reproducible and can be
+    regression-tested offline: copy-skip is read from the instance phase's
+    "skipping … re-install" detail, the GC peak from memory-monitor's
+    "Peak heap observed in GC log: N MB" detail, the settle gap(s) from the
+    actual measured waits, and the engine version from the product config.
+    """
+    copy_skip = None
+    gc_peak = None
+    for p in phases or []:
+        d = str(p.get("detail") or "")
+        if p.get("name") == "instance" and "skipping" in d and "re-install" in d:
+            copy_skip = True
+        if p.get("name") == "memory-monitor" and "Peak heap" in d:
+            m = re.search(r"Peak heap observed in GC log: (\d+)\s*MB", d)
+            if m:
+                gc_peak = int(m.group(1))
+    settles = list(settle_secs or [])
+    return {
+        "copySkip": copy_skip,
+        "settleSec": settles[-1] if settles else None,
+        "settleSecs": settles,
+        "gcPeakMb": gc_peak,
+        "engineVersion": engine_version,
+    }
+
+
 def run_deep_test(env: dict, graph: dict) -> dict:
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     phases = []
@@ -426,6 +599,7 @@ def run_deep_test(env: dict, graph: dict) -> dict:
         return _finish("deep", standard["status"], started, phases, log_files, standard["summary"])
 
     # 1. Server start + world creation
+    _settle_before_launch(env, "vanilla server start")
     ph("server-start", "RUNNING", "Starting vanilla server (nogui) to create and load a real world…")
     try:
         server_jar = env.get("serverJar")
@@ -466,29 +640,23 @@ def run_deep_test(env: dict, graph: dict) -> dict:
 
     # 2. Client quickplay world load
     world_load_skipped = False
-    ph("world-load", "RUNNING", "Loading the created world in the client (--quickPlaySingleplayer)…")
     if not quick_play_supported(env["mcVersion"]):
         world_load_skipped = True
         ph("world-load", "SKIP", f"QuickPlay (--quickPlaySingleplayer) requires Minecraft 1.20.2+; {env['mcVersion']} cannot auto-load a world")
         ph("memory-monitor", "SKIP", "GC heap monitoring runs during client world load, which is unavailable on this MC version")
     else:
+        _settle_before_launch(env, "client quickplay world load")
+        ph("world-load", "RUNNING", "Loading the created world in the client (--quickPlaySingleplayer)…")
         try:
-            world_src = Path(env["gameDir"]) / "world"
-            world_dst = Path(env["gameDir"]) / "saves" / "world"
-            if world_src.exists():
-                shutil.rmtree(world_dst, ignore_errors=True)
-                try:
-                    world_src.rename(world_dst)
-                except OSError:
-                    shutil.copytree(world_src, world_dst)
-                    shutil.rmtree(world_src, ignore_errors=True)
-                env["logger"].info("test", f"Moved server world {world_src} → {world_dst} for client quickplay")
+            moved = move_server_world_to_saves(env["gameDir"])
+            if moved:
+                env["logger"].info("test", "Moved server world → saves/world for client quickplay")
             else:
                 env["logger"].warn("test", "No server world found — quickplay may fail to find a world")
             assembled = assemble(env)
             res = launch_client(env, assembled, {
                 "label": "quickplay", "quickPlayWorld": "world", "collectGcLog": True,
-                "watchFor": "world", "timeoutMs": 420000,
+                "watchFor": "world", "timeoutMs": _launch_timeout_ms(env),
             })
             lines = list(res["latest"]) + list(res.get("gcLog") or []) + list(res["console"])
             loaded = world_load_detected(lines)
@@ -506,10 +674,17 @@ def run_deep_test(env: dict, graph: dict) -> dict:
             return _finish("deep", "FAIL", started, phases, log_files, "World load errored")
 
     # 3. Reproducibility
+    # The previous JVM (standard client, server, quickplay) was taskkilled but
+    # Windows does not reclaim its pages instantly — spawning the next 4 GB-heap
+    # client while the old pages are still being released starves the JVM on
+    # constrained boxes (mixin-transformer NPE: ClassInfo targetClass null).
+    # Settle before the relaunch so memory is actually free (Issue: reproducible
+    # second launch failing on the 155-mod pack).
+    _settle_before_launch(env, "reproducibility relaunch")
     ph("reproducibility", "RUNNING", "Launching again to check reproducibility…")
     try:
         assembled = assemble(env)
-        res = launch_client(env, assembled, {"label": "repro-2", "timeoutMs": 420000, "watchFor": "menu"})
+        res = launch_client(env, assembled, {"label": "repro-2", "timeoutMs": _launch_timeout_ms(env), "watchFor": "menu"})
         menu = main_menu_reached(res["latest"])
         ph("reproducibility", "PASS" if menu else "FAIL",
            "Second launch reached main menu" if menu else f"Second launch did not reach menu (exit {res.get('code')})")

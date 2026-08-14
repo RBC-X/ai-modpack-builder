@@ -19,6 +19,12 @@ class PyEngine:
     def __init__(self, service: Optional[_Service] = None):
         self._s = service or _Service()
 
+    def close(self) -> None:
+        """Release engine-held resources (compat DB handle)."""
+        mem = getattr(self._s, "memory", None)
+        if mem is not None and hasattr(mem, "close"):
+            mem.close()
+
     # -- helpers ---------------------------------------------------------
     def _call(self, fn, *args, **kwargs):
         try:
@@ -46,6 +52,9 @@ class PyEngine:
 
     def log(self, build_id: str, name: str) -> str:
         return self._s.log(build_id, name)
+
+    def read_file(self, build_id: str, logical_path: str) -> str:
+        return self._call(self._s.read_file, build_id, logical_path)
 
     def evidence(self, build_id: str, name: str) -> str:
         return self._s.evidence(build_id, name)
@@ -159,6 +168,9 @@ class PyEngine:
     def set_ram(self, build_id: str, ram_gb: int) -> dict:
         return self._s.set_ram(build_id, ram_gb)
 
+    def download_summary(self, limit: int = 120) -> dict:
+        return self._s.download_summary(limit)
+
     def set_auto_relaunch(self, build_id: str, enabled: bool) -> dict:
         return self._s.set_auto_relaunch(build_id, enabled)
 
@@ -184,6 +196,9 @@ class PyEngine:
 
     def hardware_refresh(self) -> dict:
         return self._s.hardware_refresh()
+
+    def free_ram(self) -> dict:
+        return self._s.free_ram()
 
     def settings_get(self) -> dict:
         return self._s.settings_get()

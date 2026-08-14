@@ -577,3 +577,103 @@ red `⚠ CRASH DETECTED` banner and `✔ Main menu reached` line. Verified live:
 - Add the CurseForge API key and run its live suite, or run Deep mode on 1.20.2+ Forge/NeoForge (quickplay world-load with a Forge pack).
 - Optional future UX: saved-pack favourites and pause/resume controls for active downloads.
 - Run the new Deep mode against a large (162-mod) pack to measure startup wall-clock at scale; fail-fast + stall detector already cut doomed-launch time from 420s to seconds.
+
+## Bug / reliability / UI repair pass (2026-08-13) — all suites green
+- New `pyqt/bugfix_regression_test.py` — **84/84 PASS** covering the 30-issue
+  repair mandate: fail-closed candidate promotion (parent untouched on sync
+  failure, `promote-failed` history recorded), exact-parity instance sync
+  (removed mods physically deleted, config promoted), truly restorable
+  snapshots (config content reconstructed from the object store — verified
+  bytes, not just a record), dependency-safe manual add/remove (duplicate
+  guard before any network call; removal of a required library is blocked
+  naming its dependents), revision-safe retest (mid-test mutation cannot
+  overwrite newer state; infra failure persists an ERROR record with
+  `TestInfrastructureError`), the explicit files() logs contract (path
+  containment rejects `../secret`, drive, UNC and absolute paths),
+  hardened archive imports (traversal dropped, zip-bomb single-file /
+  entry-count / declared-size limits enforced), npm-style `~` version
+  ranges (comma-separated conjunctions keep both constraints),
+  `NEEDS_VALIDATION` when `testedRevision != revision` (summary AND health
+  agree), global `download_summary()` (active-first across all packs),
+  presentation fields on every pack summary (no first-25 gap), and the
+  exact `set_ram` contract.
+- **UI/UX repairs**: AI Builder stream/poll lifecycle is session-bound with a
+  stop event and bounded backoff (no unbounded `while True`, no stale
+  callbacks); one authoritative terminal outcome for timeline/done card/Play
+  (testResult preferred); successful builds resolve in-progress stages
+  (no stuck spinner); 960px fixed content (AI Builder, Downloads, Activity)
+  is now max-width + expanding so nothing clips at 1080×700; Library grid
+  reflows on resize (debounced breakpoint) with a responsive filter bar
+  (loader pills collapse to a dropdown); Settings is a true overlay that
+  never routes through QStackedWidget and closing restores the covered page;
+  no manual `showEvent(None)` invocations; presentation enrichment falls
+  back to summary fields for all packs.
+- **Cross-cutting engine hardening**: `CompatibilityDatabase.close()`
+  (SQLite handle no longer locks temp workspaces on Windows),
+  `write_json_file` retries transient AV/OneDrive file locks, and
+  `_sync_candidate_instance` treats a missing candidate dir as empty
+  (exact parity).
+- **Live validation**: security/quality regressions 13/13, smoke,
+  library-persist, settings-overlay (incl. Escape close + tab memory),
+  identity-UI, launch-state and density/home suites ALL PASS; every edited
+  module compiles clean. Full details: `BUG_FIX_AUDIT.md`.
+
+## 2026-08-13 — 1.0.15 release: audit gaps closed with real-game evidence
+
+- **Deep test — flagship (Forge 1.20.1, 155 mods): PASS** in 8.6 min
+  (instance, mojang-install, launch, main-menu, server-start, world-creation,
+  reproducibility; world-load + memory-monitor correctly SKIP on 1.20.1 —
+  QuickPlay requires 1.20.2+). Evidence: `workspace/deep-evidence-flagship.json`.
+- **Deep test — medieval pack (Fabric 1.20.4, 16 mods): PASS** in 16 min with
+  the full evidence set the audit flagged as missing: client quickplay loaded
+  the server-created world (PASS) and GC heap monitoring recorded an **815 MB
+  peak** from `gc.log` (PASS), plus reproducibility PASS.
+- **Organic crash → repair loop on the flagship: PASS.** Real game crash
+  (geckolib removed → Forge "Missing or unsupported mandatory dependencies",
+  requested by dmnr/arsmagicalegacy/mna/bosses_of_mass_destruction) →
+  `fix()` resolved + downloaded + installed geckolib → relaunch → main menu →
+  stop.
+- **Three real bugs found and fixed during the evidence runs** (all verified):
+  deep-tester WinError 183 on stale `saves/world` (`tester.py`), stale-JVM
+  block on repair relaunch (`service.add_missing` now terminates it), and
+  Forge fatal-startup crash evidence not surfacing missing deps
+  (`collect_launch_evidence` markers + latest.log fallback; `main.fix_missing`
+  now actually relaunches on `relaunch: True`).
+- **Shipped as 1.0.15**: signed installer (selftest incl. settings overlay +
+  Esc, legacy-free bundle, shader/RP engine, embedded CF key), published to
+  GitHub with 23 fresh screenshots, and the installed 1.0.14 launcher
+  auto-updated in place over the public feed — verified `current: 1.0.15`,
+  `available: false`, no dev flags.
+
+## Evidence follow-up (2026-08-13, after 1.0.15)
+
+- **Organic crash loop re-run with the evidence fixes: ALL PASS**, including
+  the missingDeps pill: `missingDeps: ['geckolib']` on the live status at
+  crash (was `[]`), fix `{'added': ['geckolib'], 'relaunch': True}`, relaunch
+  to main menu, clean stop. Log: `.freebuff/repair-exercise5.log`.
+- **NPE / unknown-crash attribution: PASS** — real flagship launch under a
+  stressed 2.5 GB heap crashed at load (`OutOfMemoryError: Java heap space`
+  + class-load errors); `attribute_crash` named **ars-magica-legacy**
+  (`exact-class`, real frames carry `~[ars-magica-legacy.jar]`);
+  `missing_dep_ids` → `[]` so the decision was **no-mutation (attribution
+  only)**. Evidence: `workspace/npe-evidence.json`.
+- **Offline world-move regression** added to the fast suite (fresh, stale-
+  replaced, locked-file, no-world) — bugfix regression now **88/88 PASS**.
+- Harness addition: `AMB_BYPASS_RAM_GUARD=1` env escape hatch for headless
+  verification runs on constrained boxes (guard intact for real users).
+- **1.0.16 hardening (2026-08-13)**: `extract_stack_frames` is now
+  block-aware and counts only real exception stack frames. Class-load probe
+  noise (WARN "Error loading class:" one-liners, ERROR "Failed to load:"
+  compat-discovery blocks — present in every healthy pack) no longer feeds
+  `attribute_crash`. Verified: a healthy flagship debug.log yields `[]` mod
+  frames (previously `ars-magica-legacy` false positive); real crash blocks,
+  mixed logs, and `Exception in thread` blocks still attribute. Bugfix suite
+  88 → **93/93 PASS**; the NPE exercise's contract updated to expect empty
+  attribution + no mutation on pure resource crashes.
+- **Fresh deep-test pair (2026-08-13, shipped state, AMB_BYPASS_RAM_GUARD)**:
+  medieval Fabric 1.20.4 **PASS** end-to-end — quickplay world load, GC heap
+  peak 816 MB, reproducibility (fresh `deep-evidence-medieval.json`).
+  Flagship Forge 1.20.1: menu/server/world-creation PASS; reproducibility
+  FAIL at the machine's RAM ceiling (0.8 GB free at second launch, mixin NPE;
+  fitted 2.5 GB heap too small for 155 mods) — recorded with the cause named
+  in `deep-evidence-flagship.json` and documented in KNOWN_LIMITATIONS.

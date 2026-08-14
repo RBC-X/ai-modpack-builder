@@ -62,6 +62,11 @@ snap(app, win, "02-library")
 
 win._open_detail(win.builds[0]["buildId"])
 wait(win, app, lambda: bool(win.packdetail.record))
+# The heap-fit badge refreshes on a 4 s timer; force one update so the
+# capture shows the live fit against free RAM.
+win.packdetail._refresh_heap_badge()
+for _ in range(4):
+    app.processEvents()
 snap(app, win, "03-pack-overview")
 win.packdetail._set_tab("content")
 snap(app, win, "04-pack-content")
@@ -121,11 +126,30 @@ win.account_modal.close()
 # launch-overlay captures so those render on the plain page again.
 win.settings.hide()
 
-# Launch overlay with the real backend status fields (no game launched).
-win.launch_overlay.show_launch(win.builds[0].get("name") or "pack")
-win.launch_overlay.apply_status({"phase": "preparing", "progress": 42, "stage": "Loading 64 mods & mixin hooks...", "modsLoaded": 27, "modsTotal": 64})
+# Launch overlay with the real backend status fields (no game launched). The
+# build id is passed so the live heap-fit field renders against real free RAM.
+win.launch_overlay.show_launch(win.builds[0].get("name") or "pack", win.builds[0].get("buildId"))
+win.launch_overlay.apply_status({"phase": "preparing", "progress": 42, "stage": "Loading 64 mods & mixin hooks...", "modsLoaded": 27, "modsTotal": 64,
+                                 "heapFit": "Heap fitted to RAM: 4096 → 2560 MB (2.3 GB free)"})
+win.launch_overlay._refresh_live_fit()
+for _ in range(4):
+    app.processEvents()
 win.launch_overlay._reposition(1320, 840)
 snap(app, win, "12-launch-overlay")
+
+# Crash drawer with the live missing-dependency pills — the state the engine
+# reaches after a real Forge fatal-startup crash (error text + missingDeps are
+# the exact fields collect_launch_evidence populates from latest.log).
+crash_bid = win.builds[0].get("buildId") or ""
+win.launch_overlay.hide()
+win.crash_drawer.show_report(
+    crash_bid,
+    {"phase": "error", "error": "Missing or unsupported mandatory dependencies: Mod ID: 'geckolib', Requested by: dmnr / arsmagicalegacy / mna / bosses_of_mass_destruction. Actual version: [MISSING]",
+     "missingDeps": ["geckolib"], "crashFiles": [], "modsLoaded": 151, "modsTotal": 155},
+    win.builds[0].get("name") or "pack")
+win.crash_drawer._reposition(1320, 840)
+snap(app, win, "12b-crash-drawer")
+win.crash_drawer.hide()
 
 # Release-notes update toast: title + rendered markdown notes + the
 # Review & install action users see before an update applies. The version

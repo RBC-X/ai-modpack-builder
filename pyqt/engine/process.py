@@ -31,12 +31,16 @@ def run_process(opts: dict) -> dict:
     kill_triggered = [False]
 
     flags = subprocess.CREATE_NO_WINDOW if _IS_WIN else 0
+    # On POSIX the child becomes its own session/process-group leader so the
+    # later killpg() only ever targets THIS child's tree — never a group the
+    # launcher shares with the parent (Issue 17). Windows keeps taskkill /T.
+    start_new_session = False if _IS_WIN else True
     try:
         proc = subprocess.Popen(
             [opts["cmd"]] + list(opts.get("args") or []),
             cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, creationflags=flags, text=True,
-            errors="replace", bufsize=1,
+            errors="replace", bufsize=1, start_new_session=start_new_session,
         )
     except Exception as e:
         log(f"SPAWN ERROR: {e}")
@@ -54,6 +58,8 @@ def run_process(opts: dict) -> dict:
                                capture_output=True, creationflags=flags)
             else:
                 try:
+                    # start_new_session made the child its own group leader, so
+                    # getpgid(pid) == pid and only the child's tree is killed.
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 except Exception:
                     proc.kill()

@@ -1,5 +1,171 @@
 # Changelog
 
+## 2026-08-14 — 1.0.20: live heap fit in the launch overlay + clickable RAM badge
+
+- **Live heap-fit field in the launch overlay.** While a pack is starting,
+  the overlay re-runs the launch-time fit against the RAM free right now
+  (requested → fitted, plus free GB) every 4 s — "Heap fit to RAM: 4096 →
+  1536 MB on this launch (2.1 GB free)" — so the exact heap the running
+  launch picked is visible during the wait, not just in Pack Detail.
+- **Clickable heap badge → Settings RAM slider.** The Pack Detail hero's
+  heap-fit badge is now a link-styled control: clicking it jumps straight to
+  the Settings tab and pre-applies the current fit to the RAM slider
+  (clamped 2-16 GB, labeled "heap fit pre-applied"), so users can review and
+  APPLY RAM without recomputing the fit themselves.
+- **Flagship deep test re-verified with the measured settle** (1.0.19
+  engine): PASS in 7.5 min with `settleSecs: [10.0, 10.0]` recorded — the
+  adaptive settle correctly measured fast reclamation and used the 10 s
+  floor instead of a fixed 45 s; copySkip True, reproducibility relaunch
+  reached the menu.
+
+## 2026-08-14 — 1.0.19: measured deep-test settles + live heap-fit badge
+
+- **Deep-test phase settle is now measured, not fixed.** The gap between
+  deep phases (client → server → quickplay → reproducibility) no longer waits
+  a hard-coded 45 s: the tester polls free RAM and settles only until the
+  killed JVM's pages have actually been reclaimed (free RAM plateaus), with
+  the old `AMB_PHASE_GAP_SEC` kept as a floor and a new `AMB_MAX_SETTLE_SEC`
+  cap (default 120 s) so a machine whose pages never stop churning can't
+  hang. Fast machines settle at the floor; slow ones wait exactly as long as
+  Windows needs. Every measured gap is recorded in the evidence JSON
+  (`settleSec` = last, `settleSecs` = all).
+- **Live 'heap fitted to RAM' badge on Pack Detail.** The hero now shows the
+  exact heap the next PLAY will pick against the RAM free right now
+  (e.g. "Heap fit to RAM: 4096 → 2560 MB on next launch (2.3 GB free)"),
+  re-running the adaptive fit every 4 s while the view is open — so a pack's
+  down-fitted heap is visible before launch, not just during it.
+- **Evidence stamping extracted + regression-covered.** The deep-test driver
+  now builds its `copySkip` / `settleSec` / `gcPeakMb` / `engineVersion`
+  fields through one pure helper, and 8 new offline regressions pin the
+  stamping to the real phase detail strings (including the no-skip and
+  no-GC-peak cases) plus the settle floor/plateau/cap behavior.
+
+## 2026-08-14 — 1.0.18: RAM-adaptive heap + instant relaunches + flagship reproducibility
+
+- **RAM-adaptive heap fitting.** At launch the launcher now measures the RAM
+  actually free, reserves ~1.5 GB for the OS + the game's native footprint,
+  and fits the JVM heap into what remains (clamped 1.5-4 GB in 256 MB steps)
+  instead of always using the pack's fixed fitted value. A 155-mod pack no
+  longer launches a 4 GB heap into a machine that only has 2 GB free — the
+  over-commit that produced clean exit-0 deaths on low-RAM boxes. The launch
+  overlay shows a "Heap fitted to RAM: X → Y MB" note when the launcher
+  down-fits, and the stage log records the old → new values. Harnesses that
+  explicitly bypass the RAM guard keep the requested heap.
+- **Instant relaunches: identical jars are no longer re-copied.** The instance
+  installer rewrote every jar before each launch (2-3 GB on the 155-mod
+  flagship), dirtying the Windows page cache exactly as the JVM grew and
+  starving it. Installers now skip files with matching size + mtime
+  (copy2), and the test harness skips the whole re-install when every
+  expected mod is already present. Relaunching a pack is now near-instant
+  and does not fight the game for memory.
+- **Flagship reproducibility now PASSES on this 7 GB machine.** With the
+  copy-skip fix, a 45 s phase settle (AMB_PHASE_GAP_SEC — Windows needs
+  more than 10 s to reclaim a killed 4 GB client + 1.5 GB server) and an
+  11-min per-launch timeout (AMB_LAUNCH_TIMEOUT_MS — resource loading
+  crawls under pressure), the full deep test is green: main menu, server
+  "Done", world generation, and the second launch all reach the menu at the
+  pack's 4 GB heap (`workspace/deep-evidence-flagship.json`, 8.9 min).
+  Quickplay + GC phases remain MC 1.20.2+ features; the medieval 1.20.4
+  pack records those phases.
+- **5 new offline regressions** (heap-fit boundaries, copy-skip behavior);
+  bugfix suite 96 → 101.
+
+## 2026-08-14 — 1.0.17: Relaunch settle fix + crash-drawer gallery shot
+
+- **Relaunch settle between deep-test phases.** The deep test taskkills each
+  phase's JVM, but Windows releases a killed JVM's pages asynchronously — on a
+  RAM-constrained box the next 4 GB-heap launch could spawn while the previous
+  heap was still being freed, starving the JVM (the reproducibility mixin NPE
+  on the 155-mod flagship). `tester.py` now settles `phaseGapSec` (default
+  10 s) before the server start, quickplay world load, and reproducibility
+  relaunch so memory is actually free. Configurable per run for harness tuning.
+- **Lower-heap forensics (why the default stays ~4 GB).** Live re-runs proved
+  a 2560 MB heap gets the 155-mod Forge pack past discovery and client launch
+  but then dies with `OutOfMemoryError: Java heap space` during resource
+  loading — a lower default heap does not make big packs reproducible.
+  Under heavy machine RAM pressure (Chrome + a concurrent Gradle build) the
+  game JVM can additionally exit code 0 at a varying point with no crash
+  report — the documented machine-instability signature, recorded honestly in
+  `workspace/deep-evidence-flagship.json` (`cause` + `settleFix` fields).
+- **Crash-drawer screenshot in the gallery.** `12b-crash-drawer.png` renders
+  the live repair state the engine reaches after a real Forge fatal-startup
+  crash (`error: geckolib`, `missingDeps: ['geckolib']` pills) and joins the
+  README gallery alongside the launch-state shots; the screenshot pipeline
+  now ships 24 captures.
+
+## 2026-08-13 — 1.0.16: Crash-evidence hardening + verified repair loops
+
+- **`attribute_crash` hardened to real exception frames only.** Forge logs
+  harmless class-load probes in every healthy pack ("Error loading class:
+  ... ClassNotFoundException" WARN one-liners, ERROR "Failed to load:" blocks
+  for optional compat discovery). The extractor previously harvested their
+  `at ...` frames, so an unrelated crash could be mis-attributed to a mod that
+  merely failed a probe (measured on a healthy pack: `ars-magica-legacy`).
+  Now only frames inside blocks rooted at a genuine raised exception
+  (crash-report / JVM stderr / fatal-screen format) are collected, and WARN/
+  INFO/DEBUG log lines never open a trace. Regression-tested offline with real
+  log shapes: WARN one-liners and probe blocks yield zero frames, real crash
+  blocks and mixed logs keep their fatal-block frames. Bugfix suite 88 → 93.
+- **NPE attribution exercise updated to the hardened contract**: a resource
+  crash (OOM) whose only frames are class-load probes now correctly yields
+  EMPTY attribution (no guessing) and no garbage add-missing — the previous
+  run's "ars-magica-legacy attribution" was itself a probe-block false
+  positive, now eliminated.
+- Deep-test pair re-run on the current shipped state with the
+  `AMB_BYPASS_RAM_GUARD=1` harness flag, fresh evidence JSONs recorded
+  (flagship Forge 1.20.1 + medieval Fabric 1.20.4: world creation, quickplay
+  world load, GC heap monitoring, reproducibility).
+
+## 2026-08-13 — 1.0.15: Full bug / reliability / UI repair pass (30 issues)
+
+A complete correctness pass across the engine and the desktop UI — every fix
+has a regression test (`pyqt/bugfix_regression_test.py`, 84/84 PASS) and is
+documented per-issue in `BUG_FIX_AUDIT.md`.
+
+**Engine — AI edits are now true deltas, never rebuilds**
+- Conversational edits start from a frozen copy of the parent pack
+  (`CandidateMutationContext`: selections, locked mods, exact versions,
+  config, shaders/resource packs, RAM) and interpret the prompt as a delta;
+  the solver supports pinned versions so existing picks keep their exact
+  version unless the change plan says otherwise. A test pack survives an
+  "add more bosses" request with every unrelated selection preserved.
+- Candidate promotion is fail-closed: on any sync/verify failure the parent
+  record and instance stay byte-identical, no LKG update, the candidate is
+  kept for diagnosis, and the failure is recorded.
+- Instance sync is now exact-parity: removed mods physically disappear,
+  config changes are promoted, and a missing candidate directory is treated
+  as empty — no stale jars can survive a promotion.
+- Snapshots are truly restorable: config is stored as content objects and
+  reconstructed byte-for-byte, and artifacts record provider/project/version/
+  file IDs + hash so the exact file can be legally re-acquired.
+
+**Engine — correctness & safety**
+- `add_mod` short-circuits duplicates before any network call; removing a
+  required library is blocked and names its dependents.
+- Tests are revision-safe: `NEEDS_VALIDATION` when `testedRevision != revision`,
+  infrastructure failures persist an explicit `ERROR`, and a stale test can
+  never mark a newer revision validated.
+- Imports hardened: one centralized safe-destination helper rejects
+  traversal/drive/UNC/absolute escapes, plus zip-bomb limits (per-file size,
+  entry count, declared size).
+- Explicit `files()` logs contract with path containment; `~` version ranges
+  enforce the compatible-minor bound; Unix process-group isolation; the
+  `compat.db` handle is closed; record writes retry Windows file locks.
+
+**Desktop UI**
+- AI Builder shows one authoritative terminal outcome (no stuck spinner) with
+  session-bound streaming, stop support, and bounded backoff.
+- Fixed 960 px content is now max-width responsive (fits 1080×700); Library
+  reflows on resize with a debounced breakpoint and a filter bar that
+  collapses loader pills on narrow widths.
+- Settings is a true overlay — never routed through the QStackedWidget, no
+  manual `showEvent`, no hidden stack switch or flicker.
+- Card enrichment covers every pack (no more 25-pack cap) and the Download
+  Manager queries the engine globally instead of scanning an arbitrary
+  window of builds.
+- Pack health derives from one normalized, revision-aware status
+  (PASS / FAIL / ERROR / NEEDS_VALIDATION / TESTING / STALE) everywhere.
+
 ## 2026-08-13 — Home tiles + Library density control
 
 - **Home's recent-build row now uses the exact same square tile as the

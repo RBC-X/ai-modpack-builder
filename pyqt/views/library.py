@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QScrollArea, QVBoxLayout, QWidget)
+                             QLineEdit, QScrollArea, QSizePolicy, QVBoxLayout,
+                             QWidget)
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
@@ -69,15 +70,28 @@ class LibraryView(QWidget):
         bl = hbox(bar, 8, margins=(14, 18, 14, 18))
         self._search = QLineEdit(bar)
         self._search.setPlaceholderText("Search instances...")
-        self._search.setFixedWidth(320)
+        self._search.setMinimumWidth(140)
+        self._search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._search.textChanged.connect(lambda _: self._render())
-        bl.addWidget(self._search)
+        bl.addWidget(self._search, 1)
+        # Loader filter: shown as pills on wide windows, collapsed to a
+        # dropdown on narrow ones (Issue 21 — the bar must not clip).
         self._loader_pills: dict[str, QWidget] = {}
+        self._loader_row = QHBoxLayout()
+        self._loader_row.setSpacing(8)
         for f in LOADERS:
             p = pill(bar, f, active=self._loader == f)
             p.clicked.connect(lambda _=False, f=f: self._set_loader(f))
-            bl.addWidget(p)
+            self._loader_row.addWidget(p)
             self._loader_pills[f] = p
+        bl.addLayout(self._loader_row)
+        self._loader_box = QComboBox(bar)
+        self._loader_box.addItems(LOADERS)
+        self._loader_box.setCurrentText(self._loader)
+        self._loader_box.currentTextChanged.connect(self._set_loader)
+        self._loader_box.setToolTip("Loader filter (collapsed on narrow windows)")
+        self._loader_box.setVisible(False)
+        bl.addWidget(self._loader_box)
         bl.addStretch(1)
         self._density_box = QComboBox(bar)
         self._density_box.addItems(["Cozy", "Compact"])
@@ -104,12 +118,44 @@ class LibraryView(QWidget):
         self._empty = label(body, "No instances match your filter.", "sub")
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.root.addWidget(self._empty)
+        self._last_cols: int | None = None
+        self._pills_wide = True
+        self._update_filter_layout()
 
         # The original port created the scroll area but never placed it in the
         # page layout, leaving Library stuck at its 576 px size hint.
         lay = vbox(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(outer)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Debounced reflow: re-render the grid only when the layout
+        breakpoint (column count) changes, never per-pixel (Issue 20)."""
+        super().resizeEvent(event)
+        self._update_filter_layout()
+        if self._view_mode != "grid":
+            return
+        cols = self._grid_cols()
+        if cols != self._last_cols:
+            self._last_cols = cols
+            self._render()
+
+    def _grid_cols(self) -> int:
+        p = DENSITY_PARAMS[self._density]
+        avail = max(200, self.width() - 64)
+        return max(2, min(p["cols"], avail // p["target"]))
+
+    def _update_filter_layout(self) -> None:
+        """Pills on wide windows, loader dropdown on narrow ones."""
+        wide = self.width() >= 1120
+        if wide == self._pills_wide:
+            return
+        self._pills_wide = wide
+        for p in self._loader_pills.values():
+            p.setVisible(wide)
+        self._loader_box.setVisible(not wide)
+        # Keep the dropdown in sync with the current loader filter.
+        self._loader_box.setCurrentText(self._loader)
 
     # ------------------------------------------------------------------
     def _set_loader(self, loader: str) -> None:
@@ -184,9 +230,10 @@ class LibraryView(QWidget):
         if self._view_mode == "grid":
             # Adaptive columns driven by the density preset: compact targets
             # ~205 px tiles (5-up on wide windows), cozy ~250 px (4-up).
+            cols = self._grid_cols()
+            self._last_cols = cols
             p = DENSITY_PARAMS[self._density]
             avail = max(200, self.width() - 64)
-            cols = max(2, min(p["cols"], avail // p["target"]))
             card_w = (avail - (cols - 1) * 16) // cols
             for col in range(cols):
                 self._grid.setColumnStretch(col, 1)

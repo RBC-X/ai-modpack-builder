@@ -151,13 +151,24 @@ def read_json_file(p: Path) -> Optional[Any]:
 
 
 def write_json_file(p: Path, data: Any) -> None:
+    """Atomic write with a bounded retry on transient Windows locks
+    (antivirus/OneDrive brief holds can otherwise fail os.replace)."""
     mkdirp(Path(p).parent)
     target = Path(p)
     temporary = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        temporary.write_text(json.dumps(data, indent=2), "utf-8")
-        os.replace(temporary, target)
-    finally:
+    last_err: Exception | None = None
+    for _attempt in range(3):
+        try:
+            temporary.write_text(json.dumps(data, indent=2), "utf-8")
+            os.replace(temporary, target)
+            last_err = None
+            break
+        except OSError as e:  # noqa: BLE001 — transient lock; retry briefly
+            last_err = e
+            sleep(0.15 * (_attempt + 1))
+    if last_err is not None:
+        raise last_err
+    else:
         temporary.unlink(missing_ok=True)
 
 
@@ -188,8 +199,32 @@ def compare_versions(a: str, b: str) -> int:
     return 0
 
 
+def _tilde_bounds(v: str) -> tuple[str, str]:
+    """npm-style compatible range for '~v': >= v and < the next minor (or the
+    next major when v has only one numeric part). '~1.2' -> (1.2, 1.3),
+    '~1.2.3' -> (1.2.3, 1.3), '~1' -> (1, 2)."""
+    nums = re.findall(r"\d+", v)
+    if not nums:
+        return v, ""
+    if len(nums) == 1:
+        return v, str(int(nums[0]) + 1)
+    lo = ".".join(nums[:2])
+    hi = f"{nums[0]}.{int(nums[1]) + 1}"
+    return lo, hi
+
+
 def parse_version_range(spec: str) -> list[dict]:
-    """Parse Modrinth-style ranges: '>=0.5.1', '[1.0,2.0)', '1.0', '~1.2'."""
+    """Parse Modrinth-style version ranges into a list of constraints.
+
+    Supported syntax (documented — Issue 16):
+      "1.2"              exact
+      ">1.2" ">=1.2" "<1.2" "<=1.2"
+      "[1.2,2.0)"        interval (exclusive/inclusive brackets)
+      "~1.2"             compatible minor: >=1.2 and <1.3 (npm semantics)
+      "1.2 2.0"          space-separated conjunction (all must hold)
+    Minecraft-style names ("1.20.1", "1.20.1-beta") compare naturally by
+    numeric parts; prerelease suffixes sort before the release.
+    """
     spec = (spec or "").strip()
     if not spec:
         return []
@@ -206,11 +241,21 @@ def parse_version_range(spec: str) -> list[dict]:
         if hi_v.strip():
             out.append({"op": "<=" if hi_bracket == "]" else "<", "version": hi_v.strip()})
         return out
-    for p in spec.split():
+    # Commas are optional separators (">=1.20, <1.21" == ">=1.20 <1.21");
+    # normalize them so the first constraint is never dropped (Issue 16).
+    for p in spec.replace(",", " ").split():
         cm = re.match(r"^(>=|<=|>|<|=|~)?([0-9][A-Za-z0-9.\-_+]*(?::[A-Za-z0-9.\-_+]+)?)$", p)
         if not cm:
             continue
         op, v = cm.groups()
+        if op == "~":
+            # ~ is a compatible-minor range, not merely '>=' (was the old bug:
+            # anything above the floor matched, so ~1.2 accepted 2.x).
+            lo, hi = _tilde_bounds(v)
+            out.append({"op": ">=", "version": lo})
+            if hi:
+                out.append({"op": "<", "version": hi})
+            continue
         out.append({"op": op or "=", "version": v})
     return out
 
@@ -234,6 +279,8 @@ def version_satisfies(version: str, range_spec: Optional[str]) -> bool:
             return False
         if op == "=" and cmpv != 0:
             return False
+        # '~' is expanded by parse_version_range into >= + <; keep the direct
+        # call safe for legacy single-constraint use (floor check only).
         if op == "~" and cmpv < 0:
             return False
     return True
