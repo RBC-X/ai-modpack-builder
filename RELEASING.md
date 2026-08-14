@@ -53,6 +53,30 @@ feed at `workspace/update-feed-https/update.json` (rewriting `installerUrl` to
 to the repo (e.g. `update.json` at the repo root, served by GitHub Pages or the
 release's `latest/download` URL).
 
+## Release provenance (source-of-truth rule)
+
+A release's Git tag MUST point at the exact commit that produced its
+installer — the tagged source has the same `APP_VERSION`, tests, and fixes the
+release notes advertise. On 2026-08-14 the **v1.0.22 tag pointed at a CI
+screenshot-bot commit** (`b014885`) whose source still said `APP_VERSION =
+"1.0.21"` and lacked the advertised fixes, because the release was published
+from the working tree and the tag was created after a bot commit landed.
+
+Correction (documented supersession, no history rewrite):
+
+- `v1.0.22` was force-moved to `113bedd` — the commit whose working tree
+  actually produced the published 1.0.22 installer (fixes + tests present,
+  `APP_VERSION = "1.0.22"`). GitHub's release page and source archives for
+  v1.0.22 now resolve to that commit.
+- Every release from 1.0.23 on is **built from a clean checkout of its own
+  tag** (`git worktree add` at the tagged commit), so the tag can never drift
+  from the shipped bits again. The build reuses the shared toolchain venv via
+  `AMB_VENV_PY` — the venv is environment, not source.
+
+To verify any release: `git rev-parse vX.Y.Z^{} ` must match the commit whose
+working tree built the installer, and `pyqt/product_config.py` in that commit
+must print the same `APP_VERSION` the installer reports.
+
 ## Point the launcher at the public feed
 
 - In the app: **Settings → Updates → Update feed URL** → paste
