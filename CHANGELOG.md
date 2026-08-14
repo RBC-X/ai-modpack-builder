@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-08-14 — 1.0.21: module split, WCAG pass, fresh-workspace DB fix
+
+- **Fresh-workspace database fix (CI-caught).** The engine's SQLite store
+  only created its `entries` table inside a dead, shadowed `close()` method
+  — so a brand-new user's very first build crashed with `no such table:
+  entries`. Schema creation now runs once, idempotently, at store open.
+  Found by the CI "Pages + screenshots" workflow, which was failing on
+  fresh workspaces; the workflow is green again and a regression check
+  covers the exact failure.
+- **Module split (no behavior change).** `main.py` (1859 lines) and
+  `views/packdetail.py` (1255 lines) were split into cohesive modules:
+  `views/topbar.py`, `views/health_mixin.py`, `views/launch_mixin.py`, and
+  `views/packdetail_tabs.py`. Every view still constructs and every suite
+  stays green — the split is purely organizational.
+- **WCAG pass on views.** Sidebar navigation is now keyboard-reachable
+  (Tab focus + Enter/Space activation, previously mouse-only), a visible
+  focus ring was added for focused nav items, and dark-theme `MUTED` text
+  contrast was raised from 3.9:1 to 4.6:1 (AA for small text).
+- Source now matches the shipped product: the 1.0.15–1.0.20 backlog
+  (58 files) plus this round's fixes are committed and pushed to the
+  public repo.
+
 ## 2026-08-14 — 1.0.20: live heap fit in the launch overlay + clickable RAM badge
 
 - **Live heap-fit field in the launch overlay.** While a pack is starting,
