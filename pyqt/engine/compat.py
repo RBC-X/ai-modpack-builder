@@ -25,36 +25,36 @@ class CompatibilityDatabase:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self.db = sqlite3.connect(self.path, check_same_thread=False)
+        self._ensure_schema()
 
-    def close(self) -> None:
-        """Release the SQLite handle so the DB file is not left locked
-        (critical for temp workspaces / tests on Windows)."""
-        try:
-            self.db.close()
-        except Exception:  # noqa: BLE001
-            pass
-        self.db.executescript("""
-            CREATE TABLE IF NOT EXISTS entries (
-                id TEXT PRIMARY KEY,
-                minecraft_version TEXT NOT NULL,
-                loader TEXT NOT NULL,
-                loader_version TEXT,
-                java_version TEXT,
-                mods TEXT NOT NULL,
-                result TEXT NOT NULL,
-                crash_signature TEXT,
-                exception TEXT,
-                world_ok INTEGER,
-                server_ok INTEGER,
-                memory_mb INTEGER,
-                repair TEXT,
-                resolution TEXT,
-                build_id TEXT,
-                ts TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_entries_mc_loader ON entries(minecraft_version, loader);
-            CREATE INDEX IF NOT EXISTS idx_entries_result ON entries(result);
-        """)
+    def _ensure_schema(self) -> None:
+        """Create the schema on every open (idempotent). This must live in
+        __init__: a stale copy of it sat inside a shadowed close() method, so
+        fresh databases (new installs, CI workspaces) were never created and
+        the first query failed with 'no such table: entries'."""
+        with self._lock:
+            self.db.executescript("""
+                CREATE TABLE IF NOT EXISTS entries (
+                    id TEXT PRIMARY KEY,
+                    minecraft_version TEXT NOT NULL,
+                    loader TEXT NOT NULL,
+                    loader_version TEXT,
+                    java_version TEXT,
+                    mods TEXT NOT NULL,
+                    result TEXT NOT NULL,
+                    crash_signature TEXT,
+                    exception TEXT,
+                    world_ok INTEGER,
+                    server_ok INTEGER,
+                    memory_mb INTEGER,
+                    repair TEXT,
+                    resolution TEXT,
+                    build_id TEXT,
+                    ts TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_entries_mc_loader ON entries(minecraft_version, loader);
+                CREATE INDEX IF NOT EXISTS idx_entries_result ON entries(result);
+            """)
 
     def record(self, entry: dict) -> None:
         eid = entry.get("id") or uid("mem-")

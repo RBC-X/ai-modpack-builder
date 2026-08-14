@@ -631,6 +631,30 @@ check("settle: hard cap respected when RAM never plateaus",
       8.0 <= _gap_cap <= 10.0, f"{_gap_cap:.1f}s")
 _tester_mod._free_gb = _real
 
+# Fresh-compat-db schema regression: the entries table used to be created only
+# inside a shadowed close() method, so a brand-new database (new install, CI
+# workspace) failed every query with 'no such table: entries'. CI's seed build
+# caught it on a fresh AMB_WORKSPACE.
+import sqlite3 as _sqlite3  # noqa: E402
+with tempfile.TemporaryDirectory() as _cdir:
+    from engine.compat import CompatibilityDatabase  # noqa: E402
+    cdb = CompatibilityDatabase(os.path.join(_cdir, "compat.db"))
+    _schema_err = ""
+    try:
+        try:
+            cdb.record({"minecraftVersion": "1.20.1", "loader": "forge",
+                        "mods": {"jei": 1}, "result": "pass", "buildId": "b-x"})
+            cdb.record({"minecraftVersion": "1.20.1", "loader": "forge",
+                        "mods": {"jei": 1}, "result": "fail", "buildId": "b-y"})
+            _ok_schema = (cdb.count() == 2
+                          and len(cdb.history_for("1.20.1", "forge")) == 2)
+        except _sqlite3.OperationalError as _e:
+            _ok_schema = False
+            _schema_err = str(_e)
+    finally:
+        cdb.close()
+check("fresh compat.db creates schema and stores entries", _ok_schema, _schema_err)
+
 print()
 passed = sum(1 for _n, ok in checks if ok)
 failed = [(n, d) for n, ok in checks if not ok]
