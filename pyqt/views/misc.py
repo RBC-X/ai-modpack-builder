@@ -459,10 +459,16 @@ class ActivityView(QWidget):
 # ===========================================================================
 def _state_path() -> str:
     """UI state file: LOCALAPPDATA when frozen (bundle may be read-only),
-    the checkout's pyqt/ dir in dev."""
-    from engine.core import is_frozen, data_dir
+    the checkout's pyqt/ dir in plain dev. When AMB_WORKSPACE is set (every
+    test harness), the state file lives inside that workspace so tests never
+    read or write a developer's prior preferences (sidebar density, last
+    settings tab, discover page memory) — Issue: clean-workspace isolation.
+    """
+    from engine.core import is_frozen, data_dir, workspace_dir
     if is_frozen():
         return str(data_dir() / "state.json")
+    if os.environ.get("AMB_WORKSPACE"):
+        return str(workspace_dir() / "state.json")
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state.json")
 
 

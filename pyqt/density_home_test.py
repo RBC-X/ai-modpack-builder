@@ -50,7 +50,9 @@ theme.setup_fonts(app)
 api = PyEngine()
 win = MainWindow(api)
 win.show()
-win.resize(1320, 840)
+# Wide enough that Cozy (4-up, target 250) and Compact (5-up, target 205)
+# express distinct column counts under the scrollbar-reserved width math.
+win.resize(1366, 768)
 
 # The Library loads builds asynchronously (refresh_builds on a worker); the
 # tile-geometry checks below need the real pack list, so wait for it to land
@@ -89,6 +91,21 @@ def tile_size(grid):
     return (0, 0)
 
 
+def tile_for(grid, name):
+    """The tile whose accessible name matches a pack name — the two grids can
+    hold the SAME pack at DIFFERENT positions (Library is sorted by newest,
+    Home shows builds[:3]), and comparing first-tiles of different packs
+    compares different name-wraps. Always compare the same pack."""
+    for i in range(grid.count()):
+        w = grid.itemAt(i).widget()
+        if w is None:
+            continue
+        an = w.accessibleName() or ""
+        if name and (an.endswith(name) or name in an):
+            return w.width(), w.height()
+    return (0, 0)
+
+
 def first_tile(grid):
     for i in range(grid.count()):
         w = grid.itemAt(i).widget()
@@ -113,7 +130,13 @@ def measure():
     settle()
     hw, hh = tile_size(win.home._recent_grid)
     hplay = has_play(first_tile(win.home._recent_grid))
-    return lw, lh, lcols, lplay, hw, hh, hplay
+    # Compare the SAME pack across the two grids: Library sorts by newest,
+    # Home shows builds[:3], so first-tiles can be different packs whose names
+    # wrap differently at compact width.
+    pack_name = (first_tile(win.home._recent_grid).accessibleName() or "Open ")[len("Open "):]
+    lw2, lh2 = tile_for(win.library._grid, pack_name)
+    hw2, hh2 = tile_for(win.home._recent_grid, pack_name)
+    return lw, lh, lcols, lplay, hw, hh, hplay, (lw2, lh2, hw2, hh2)
 
 
 # ----- cozy -----
@@ -121,13 +144,14 @@ check("density combo present in Library bar",
       hasattr(win.library, "_density_box") and win.library._density_box.currentText() == "Cozy")
 check("library has builds to tile", len(win.builds) >= 1, f"{len(win.builds)} builds")
 
-lw, lh, lcols, lplay, hw, hh, hplay = measure()
+lw, lh, lcols, lplay, hw, hh, hplay, (lw_s, lh_s, hw_s, hh_s) = measure()
 lr = lw / lh if lh else 0
 hr = hw / hh if hh else 0
 check("cozy renders 4-up", lcols == 4, f"cols={lcols}")
 check("cozy tile near-square", 0.8 <= lr <= 1.3, f"{lw}x{lh} ratio {lr:.2f}")
 check("cozy tile has PLAY action", lplay)
-check("home tile same size as library tile", (lw, lh) == (hw, hh), f"lib {lw}x{lh} vs home {hw}x{hh}")
+check("home tile same size as library tile", (lw_s, lh_s) == (hw_s, hh_s),
+      f"lib {lw_s}x{lh_s} vs home {hw_s}x{hh_s}")
 check("home tile near-square", 0.8 <= hr <= 1.3, f"{hw}x{hh} ratio {hr:.2f}")
 check("home tile has PLAY action", hplay)
 
@@ -144,14 +168,14 @@ try:
 except Exception as e:  # noqa: BLE001
     check("density persisted per user", False, str(e))
 
-lw2, lh2, lcols2, lplay2, hw2, hh2, hplay2 = measure()
+lw2, lh2, lcols2, lplay2, hw2, hh2, hplay2, (lw_s2, lh_s2, hw_s2, hh_s2) = measure()
 lr2 = lw2 / lh2 if lh2 else 0
 check("compact renders more columns than cozy", lcols2 > lcols, f"cozy={lcols} compact={lcols2}")
 check("compact tiles smaller than cozy", lw2 < lw, f"{lw} -> {lw2}")
 check("compact tile near-square", 0.8 <= lr2 <= 1.3, f"{lw2}x{lh2} ratio {lr2:.2f}")
 check("home mirrored compact density and matches library",
-      (lw2, lh2) == (hw2, hh2) and win.home._density == "compact",
-      f"lib {lw2}x{lh2} vs home {hw2}x{hh2}")
+      (lw_s2, lh_s2) == (hw_s2, hh_s2) and win.home._density == "compact",
+      f"lib {lw_s2}x{lh_s2} vs home {hw_s2}x{hh_s2}")
 check("compact tiles still have PLAY", lplay2 and hplay2)
 
 # restore user state

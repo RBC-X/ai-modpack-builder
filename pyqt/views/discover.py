@@ -92,6 +92,7 @@ class DiscoverView(QWidget):
         body = QWidget()
         body.setProperty("page", "true")
         outer.setWidget(body)
+        self._scroll = outer
         self.root = vbox(body, 22, margins=(32, 30, 32, 32))
         self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -133,6 +134,11 @@ class DiscoverView(QWidget):
             self._provider_btns[provider_id] = source_btn
         controls_lay.addLayout(search_row)
 
+        # Filter rows: content-type pills on one line, the loader/version/
+        # page-size/sort dropdowns on the second — the same two-tier filter
+        # layout the reference launchers (CurseForge / Modrinth) use. A single
+        # non-wrapping row of six pills plus four fixed-width combos was ~1160
+        # px of minimum width, which overflowed every window below ~1400 px.
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
         self._type_btns: dict[str, object] = {}
@@ -142,17 +148,20 @@ class DiscoverView(QWidget):
             filter_row.addWidget(type_btn)
             self._type_btns[type_id] = type_btn
         filter_row.addStretch(1)
+        controls_lay.addLayout(filter_row)
 
+        combo_row = QHBoxLayout()
+        combo_row.setSpacing(8)
         self._loader_box = QComboBox(controls)
         self._loader_box.addItems(["All loaders", "Fabric", "Forge", "NeoForge", "Quilt"])
         self._loader_box.setMinimumWidth(126)
         self._loader_box.currentIndexChanged.connect(self._on_filter)
-        filter_row.addWidget(self._loader_box)
+        combo_row.addWidget(self._loader_box)
         self._ver_box = QComboBox(controls)
         self._ver_box.addItems(["All MC versions"] + VERSIONS[1:])
         self._ver_box.setMinimumWidth(144)
         self._ver_box.currentIndexChanged.connect(self._on_filter)
-        filter_row.addWidget(self._ver_box)
+        combo_row.addWidget(self._ver_box)
         self._page_size_box = QComboBox(controls)
         self._page_size_box.addItems([f"{n} per page" for n in PAGE_SIZE_CHOICES])
         self._page_size_box.setCurrentIndex(PAGE_SIZE_CHOICES.index(self._base_page_size))
@@ -161,7 +170,7 @@ class DiscoverView(QWidget):
             "Results per page. CurseForge caps pages at 50; Modrinth returns more, "
             "so merged pages combine each source's own limit.")
         self._page_size_box.currentIndexChanged.connect(self._on_page_size)
-        filter_row.addWidget(self._page_size_box)
+        combo_row.addWidget(self._page_size_box)
         # Sort picker: downloads / recently updated / name (per content type).
         self._sort_box = QComboBox(controls)
         self._sort_box.addItems(["Most downloaded", "Recently updated", "Name (A–Z)"])
@@ -173,8 +182,9 @@ class DiscoverView(QWidget):
             "Sort order for this content type. Modrinth name-sorts client-side "
             "(no server-side title index); CurseForge uses its native sort fields.")
         self._sort_box.currentIndexChanged.connect(self._on_sort)
-        filter_row.addWidget(self._sort_box)
-        controls_lay.addLayout(filter_row)
+        combo_row.addWidget(self._sort_box)
+        combo_row.addStretch(1)
+        controls_lay.addLayout(combo_row)
         self.root.addWidget(controls)
 
         self._result_bar = QFrame(body)
@@ -508,8 +518,18 @@ class DiscoverView(QWidget):
         ))
         self._render_grid()
 
+    def _usable(self) -> int:
+        """Available content width from the SCROLL VIEWPORT (minus page
+        margins), so the grid reflows against the width the user can actually
+        see rather than the widget's nominal size."""
+        vp = self._scroll.viewport().width() if self._scroll else self.width()
+        return max(320, vp - 64)
+
     def _column_count(self) -> int:
-        width = max(self.width(), 760)
+        """Grid columns from the real viewport. One column is a supported
+        layout below ~660 px of content (previously `max(width, 760)` made
+        the floor 760 px, so a one-column layout was unreachable)."""
+        width = self._usable()
         if width >= 1480:
             return 4
         if width >= 980:
@@ -713,7 +733,10 @@ class DiscoverView(QWidget):
         drawer = QFrame(self)
         drawer.setProperty("cls", "drawer")
         theme.polish(drawer)
-        drawer.setFixedWidth(min(500, max(400, self.width() - 40)))
+        # The drawer must never be wider than the viewport it sits on (its
+        # close button lives in the header and its primary action at the
+        # bottom of a scroll area, so both stay reachable at any width).
+        drawer.setFixedWidth(min(500, max(340, self._usable())))
         drawer_outer = vbox(drawer, 0, margins=0)
         scroll = QScrollArea(drawer)
         scroll.setWidgetResizable(True)
@@ -955,3 +978,7 @@ class DiscoverView(QWidget):
         if columns != self._last_columns and self._hits:
             self._render_grid()
         self._reposition_drawer()
+        # The pager's "more may exist" hint is the first thing to give up
+        # when the row is tight — Prev/Next and the jump box stay reachable.
+        if hasattr(self, "_more_hint"):
+            self._more_hint.setVisible(self._usable() >= 860)

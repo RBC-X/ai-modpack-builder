@@ -620,6 +620,38 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         if getattr(sys, "frozen", False):
             self._update_timer.start()
 
+    def _teardown(self) -> None:
+        """Orderly shutdown: stop every timer and drain the async worker pool.
+
+        Without this, a run_async worker still executing at interpreter exit
+        posts its result into the module-level _poster while Qt is tearing
+        down, which fails fast natively (STATUS_STACK_BUFFER_OVERRUN) and
+        masks a clean exit — previously every session ended with a hard
+        crash after all work was done."""
+        for t in (self._poll, self._health, self._retry_timer,
+                  self._refresh_timer, self._import_timer, self._update_timer):
+            try:
+                t.stop()
+            except Exception:  # noqa: BLE001 — teardown must never raise
+                pass
+        cancel = getattr(self, "_import_cancel", None)
+        if cancel is not None:
+            try:
+                cancel.set()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            from PyQt6.QtCore import QThreadPool
+            QThreadPool.globalInstance().waitForDone(8000)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Closing the window must also shut down cleanly (timers + async
+        workers), so the process exits without a native teardown crash."""
+        self._teardown()
+        super().closeEvent(event)
+
     def _bootstrap(self) -> None:
         self._check_health()
         self.refresh_builds()
@@ -1310,6 +1342,9 @@ def main() -> int:
     # localhost — the desktop app IS the engine.
     api = PyEngine()
     win = MainWindow(api)
+    # Drain async workers before Qt tears down, so a busy engine thread can
+    # never post into a half-destroyed poster at exit (native fail-fast).
+    app.aboutToQuit.connect(win._teardown)
     win.show()
     # --selftest: boot the whole app offscreen, verify the in-process engine
     # and real builds load, write a JSON verdict to the workspace, then exit.

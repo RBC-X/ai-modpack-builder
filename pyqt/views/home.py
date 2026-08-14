@@ -39,6 +39,11 @@ class HomeView(QWidget):
         self._hero_icon: QLabel | None = None
         self._idea_idx = 0
         self._idea_timer: QTimer | None = None
+        self._reflow_armed = False
+        self._last_recent_w: int | None = None
+        self._last_recent_avail: int | None = None
+        self._settle_passes = 0
+        self._last_recent_cols: int | None = None
         # Mirror the Library's per-user grid density so the recent row always
         # matches the tiles in the Library (live-synced via set_density).
         self._density = "compact" if str(_load_state().get("libraryDensity", "cozy")) == "compact" else "cozy"
@@ -50,6 +55,7 @@ class HomeView(QWidget):
         body = QWidget()
         body.setProperty("page", "true")
         outer.setWidget(body)
+        self._scroll = outer
         self.root = vbox(body, 32, margins=(32, 32, 32, 32))
         self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -215,12 +221,74 @@ class HomeView(QWidget):
         surprise.clicked.connect(self._surprise_me)
         head.addWidget(surprise)
         lay.addWidget(header)
-        grid = QGridLayout()
-        grid.setSpacing(14)
+        self._starter_grid = QGridLayout()
+        self._starter_grid.setSpacing(14)
         for i, c in enumerate(concepts.STARTER_CONCEPTS):
-            grid.setColumnStretch(i % 3, 1)
-            grid.addWidget(self._concept_card(c), i // 3, i % 3)
-        lay.addLayout(grid)
+            self._starter_grid.addWidget(self._concept_card(c), i // 3, i % 3)
+        lay.addLayout(self._starter_grid)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Deferred reflow: the starter-concept grid and the fixed-width
+        recent tiles are re-measured on the next event-loop pass so the scroll
+        viewport has settled (mid-resize reads can report the previous width,
+        which makes re-renders either miss the change or compute stale tile
+        widths that overflow the viewport)."""
+        super().resizeEvent(event)
+        if not hasattr(self, "_starter_grid"):
+            return
+        if not getattr(self, "_reflow_armed", False):
+            self._reflow_armed = True
+            QTimer.singleShot(0, self._reflow_later)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Re-measure when the page becomes visible: the previous render may
+        have been computed before THIS page's scrollbar appeared."""
+        super().showEvent(event)
+        if not hasattr(self, "_starter_grid"):
+            return
+        if not getattr(self, "_reflow_armed", False):
+            self._reflow_armed = True
+            QTimer.singleShot(0, self._reflow_later)
+
+    def _reflow_later(self) -> None:
+        self._reflow_armed = False
+        avail = self._usable()
+        cols = 1 if avail < 560 else (2 if avail < 820 else 3)
+        if cols != getattr(self, "_starter_cols", None):
+            self._starter_cols = cols
+            items = []
+            while self._starter_grid.count():
+                item = self._starter_grid.takeAt(0)
+                w = item.widget()
+                if w:
+                    items.append(w)
+            for i, w in enumerate(items):
+                self._starter_grid.addWidget(w, i // cols, i % cols)
+        # Re-render regardless of whether Home is the visible page: a width
+        # change while another page is shown still needs fresh fixed-width
+        # tiles for when the user returns.
+        if not self.builds or self._hero is None:
+            return
+        p = DENSITY_PARAMS[self._density]
+        rcols = max(1, min(p["cols"], avail // p["target"]))
+        rw = (avail - (rcols - 1) * 16) // rcols
+        # Re-render on ANY width change: a scrollbar can appear between layout
+        # passes and narrow the viewport by a few pixels, and a stale tile
+        # width that wide overflows the body. A bounded settle loop re-measures
+        # once more so the final pass reads the fully settled viewport.
+        width_changed = rw != getattr(self, "_last_recent_w", 0)
+        if width_changed or rcols != getattr(self, "_last_recent_cols", 0):
+            self._last_recent_w = rw
+            self._last_recent_cols = rcols
+            self._render_recent()
+        if avail != getattr(self, "_last_recent_avail", None) and self._settle_passes < 3:
+            self._last_recent_avail = avail
+            self._settle_passes += 1
+            self._reflow_armed = True
+            QTimer.singleShot(0, self._reflow_later)
+        else:
+            self._last_recent_avail = avail
+            self._settle_passes = 0
 
     def _concept_card(self, concept: dict) -> QFrame:
         c = card(self._starter_section, hover=True)
@@ -443,6 +511,26 @@ class HomeView(QWidget):
         a4.triggered.connect(lambda: self.open_detail.emit(b.get("buildId")))
         m.exec(self._hero.mapToGlobal(self._hero.rect().bottomLeft()))
 
+    def _usable(self) -> int:
+        """Available content width, minus page margins and a reservation for
+        the vertical scrollbar.
+
+        A populated page is taller than the viewport, so the vertical scrollbar
+        appears — AFTER the first layout pass — and narrows the scroll
+        viewport. Reading the viewport width races the scrollbar: tiles
+        rendered from the pre-scrollbar width overflow by a few pixels. The
+        view's own width is stable across scrollbar appearance, so subtracting
+        the scrollbar extent up front makes the tile math deterministic: the
+        rendered grid fits with or without a scrollbar present."""
+        width = self.width()
+        if width <= 0 and self._scroll is not None:
+            width = self._scroll.viewport().width()
+        sb = 15
+        if self._scroll is not None:
+            sb = self._scroll.verticalScrollBar().sizeHint().width()
+            sb = max(12, min(24, sb))
+        return max(200, width - sb - 64)
+
     def _render_recent(self) -> None:
         while self._recent_grid.count():
             item = self._recent_grid.takeAt(0)
@@ -454,8 +542,8 @@ class HomeView(QWidget):
         # tiles are pixel-for-pixel the same size as the Library's. Trailing
         # empty columns simply take no width.
         p = DENSITY_PARAMS[self._density]
-        avail = max(200, self.width() - 64)
-        cols = max(2, min(p["cols"], avail // p["target"]))
+        avail = self._usable()
+        cols = max(1, min(p["cols"], avail // p["target"]))
         card_w = (avail - (cols - 1) * 16) // cols
         for i, b in enumerate(self.builds[:3]):
             r = i // cols

@@ -1,7 +1,7 @@
 """Library view — instance cards with search/filter/sort, grid and list modes."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QLineEdit, QScrollArea, QSizePolicy, QVBoxLayout,
                              QWidget)
@@ -43,16 +43,20 @@ class LibraryView(QWidget):
         body = QWidget()
         body.setProperty("page", "true")
         outer.setWidget(body)
+        self._scroll = outer
         self.root = vbox(body, 24, margins=(32, 30, 32, 30))
         self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Header
-        head = QHBoxLayout()
-        head.setSpacing(12)
+        # Header: title + actions. On narrow viewports the actions wrap to a
+        # second row instead of forcing the page wider than the viewport.
+        self._head_row = QHBoxLayout()
+        self._head_row.setSpacing(12)
         col = vbox(body, 2)
         col.addWidget(label(body, "Instance Library", "h1"))
-        col.addWidget(label(body, "Manage, configure, and launch your Minecraft modpack instances.", "sub"))
-        head.addLayout(col, 1)
+        sub = label(body, "Manage, configure, and launch your Minecraft modpack instances.", "sub")
+        sub.setWordWrap(True)
+        col.addWidget(sub)
+        self._head_row.addLayout(col, 1)
         ai = button(body, "BUILD WITH AI", "btn-primary", "sparkles")
         ai.clicked.connect(self.navigate_ai.emit)
         imp = button(body, "IMPORT PACK", "btn-dark", "folder")
@@ -60,10 +64,22 @@ class LibraryView(QWidget):
         nw = button(body, "NEW PACK", "btn-dark", "plus")
         nw.clicked.connect(self.new_pack_requested.emit)
         nw.setToolTip("Build your own pack from scratch — pick version/loader/RAM, then fill it from the Mod Browser.")
-        head.addWidget(ai)
-        head.addWidget(imp)
-        head.addWidget(nw)
-        self.root.addLayout(head)
+        self._ai_btn, self._imp_btn, self._nw_btn = ai, imp, nw
+        self._head_row.addWidget(ai)
+        self._head_row.addWidget(imp)
+        self._head_row.addWidget(nw)
+        self.root.addLayout(self._head_row)
+        # Wrapped-actions row (visible only when the header is too narrow):
+        # same buttons, left-aligned under the title. A widget can live in
+        # only one layout at a time, so _reflow_header moves them between rows.
+        self._head_actions = QHBoxLayout()
+        self._head_actions.setSpacing(10)
+        self._head_actions.addWidget(ai)
+        self._head_actions.addWidget(imp)
+        self._head_actions.addWidget(nw)
+        self._head_actions.addStretch(1)
+        self.root.addLayout(self._head_actions)
+        self._header_wide = True
 
         # Filter bar
         bar = card(body)
@@ -119,7 +135,11 @@ class LibraryView(QWidget):
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.root.addWidget(self._empty)
         self._last_cols: int | None = None
+        self._last_card_w: int | None = None
+        self._last_avail: int | None = None
+        self._settle_passes = 0
         self._pills_wide = True
+        self._reflow_armed = False
         self._update_filter_layout()
 
         # The original port created the scroll area but never placed it in the
@@ -128,22 +148,108 @@ class LibraryView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(outer)
 
+    def _arm_reflow(self) -> None:
+        """Defer one reflow pass to the next event-loop iteration. Both
+        resize and show can change the scroll viewport AFTER the event returns
+        (a vertical scrollbar appears once content overflows, narrowing the
+        usable width), so measuring synchronously can compute tiles from a
+        stale width."""
+        if not hasattr(self, "_reflow_armed"):
+            return
+        if not self._reflow_armed:
+            self._reflow_armed = True
+            QTimer.singleShot(0, self._reflow_later)
+
     def resizeEvent(self, event) -> None:  # noqa: N802
-        """Debounced reflow: re-render the grid only when the layout
-        breakpoint (column count) changes, never per-pixel (Issue 20)."""
+        """Debounced reflow, deferred to the next event-loop pass: mid-resize
+        the scroll viewport can still report its PREVIOUS width, so measuring
+        it synchronously and re-rendering right away can both miss a change
+        and recompute fixed-width tiles from a stale width. Deferring lets the
+        layout settle first, then re-measures and re-renders only when the
+        column count or the computed card width actually changed."""
         super().resizeEvent(event)
+        self._arm_reflow()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Re-measure when the page becomes visible: the previous render may
+        have been computed before THIS page's scrollbar appeared or the
+        sidebar state changed, leaving stale fixed-width tiles."""
+        super().showEvent(event)
+        self._arm_reflow()
+
+    def _reflow_later(self) -> None:
+        self._reflow_armed = False
         self._update_filter_layout()
+        self._reflow_header(self._usable() >= 920)
         if self._view_mode != "grid":
             return
+        avail = self._usable()
         cols = self._grid_cols()
-        if cols != self._last_cols:
+        card_w = self._card_width(cols)
+        # Re-render whenever the available width changed AT ALL (not just on a
+        # column-count change): the vertical scrollbar can appear between
+        # layout passes and narrow the viewport by a few pixels, and a stale
+        # tile width that wide overflows the body. A bounded settle loop
+        # re-measures once more after a change so the final pass reads the
+        # fully settled viewport.
+        avail_changed = avail != self._last_avail
+        self._last_avail = avail
+        width_changed = card_w != self._last_card_w
+        if cols != self._last_cols or width_changed:
             self._last_cols = cols
+            self._last_card_w = card_w
             self._render()
+        if avail_changed and self._settle_passes < 3:
+            self._settle_passes += 1
+            self._reflow_armed = True
+            QTimer.singleShot(0, self._reflow_later)
+        else:
+            self._settle_passes = 0
+
+    def _usable(self) -> int:
+        """Available content width, minus page margins and a reservation for
+        the vertical scrollbar.
+
+        A populated grid is always taller than the viewport, so the vertical
+        scrollbar appears — AFTER the first layout pass — and narrows the
+        scroll viewport by its extent. Reading the viewport width therefore
+        races the scrollbar: tiles rendered from the pre-scrollbar width come
+        out a few pixels too wide and the body clips. The view's own width
+        is stable across scrollbar appearance, so subtracting the scrollbar
+        extent up front makes the tile math deterministic: the rendered grid
+        fits with or without a scrollbar present, with no oscillation."""
+        width = self.width()
+        if width <= 0 and self._scroll is not None:
+            width = self._scroll.viewport().width()
+        sb = 15
+        if self._scroll is not None:
+            sb = self._scroll.verticalScrollBar().sizeHint().width()
+            sb = max(12, min(24, sb))
+        return max(200, width - sb - 64)
 
     def _grid_cols(self) -> int:
         p = DENSITY_PARAMS[self._density]
-        avail = max(200, self.width() - 64)
-        return max(2, min(p["cols"], avail // p["target"]))
+        avail = self._usable()
+        return max(1, min(p["cols"], avail // p["target"]))
+
+    def _reflow_header(self, wide: bool) -> None:
+        """Header actions sit beside the title on wide windows and wrap onto
+        their own left-aligned row on narrow ones, so the header never forces
+        the page wider than the viewport."""
+        if wide == self._header_wide:
+            return
+        self._header_wide = wide
+        buttons = (self._ai_btn, self._imp_btn, self._nw_btn)
+        if wide:
+            for w in buttons:
+                self._head_actions.removeWidget(w)
+            for w in buttons:
+                self._head_row.addWidget(w)
+        else:
+            for w in buttons:
+                self._head_row.removeWidget(w)
+            for w in buttons:
+                self._head_actions.addWidget(w)
 
     def _update_filter_layout(self) -> None:
         """Pills on wide windows, loader dropdown on narrow ones."""
@@ -223,18 +329,23 @@ class LibraryView(QWidget):
             out.sort(key=lambda b: b.get("createdAt") or "", reverse=True)
         return out
 
+    def _card_width(self, cols: int) -> int:
+        avail = self._usable()
+        return (avail - (cols - 1) * 16) // cols
+
     def _render(self) -> None:
         clear_layout(self._grid)
         items = self._filtered()
         self._empty.setVisible(not items)
         if self._view_mode == "grid":
             # Adaptive columns driven by the density preset: compact targets
-            # ~205 px tiles (5-up on wide windows), cozy ~250 px (4-up).
+            # ~205 px tiles (5-up on wide windows), cozy ~250 px (4-up). The
+            # available width comes from the real scroll viewport so the grid
+            # never overflows when a vertical scrollbar appears.
             cols = self._grid_cols()
             self._last_cols = cols
-            p = DENSITY_PARAMS[self._density]
-            avail = max(200, self.width() - 64)
-            card_w = (avail - (cols - 1) * 16) // cols
+            card_w = self._card_width(cols)
+            self._last_card_w = card_w
             for col in range(cols):
                 self._grid.setColumnStretch(col, 1)
             for i, b in enumerate(items):

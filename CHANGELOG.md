@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-08-14 — 1.0.23: master repair round (responsive reflow, clean-exit, provenance)
+
+- **Horizontal overflow eliminated at every supported size.** Library and
+  Home tiles were sized from the scroll viewport before the vertical
+  scrollbar appeared, leaving tiles 2–6 px too wide so the page clipped at
+  1080–1320 widths. Tile math now reserves the scrollbar extent up front and
+  uses the view's stable width, so the grid fits with or without a scrollbar
+  with no re-render oscillation. Verified by a new data-driven responsive
+  matrix (7 sizes × 100/125% DPI × sidebar states × populated/empty, plus
+  keyboard + drawer checks).
+- **Clean exit — the shutdown crash is fixed.** Every session previously
+  ended with a native fail-fast (STATUS_STACK_BUFFER_OVERRUN) because
+  run_async workers could post into the module poster while Qt was tearing
+  down. MainWindow now stops its timers and drains the async pool on close,
+  and the app hooks the same teardown to aboutToQuit; sessions exit rc=0.
+- **Smoke test is clean-workspace safe.** It now runs in an isolated
+  workspace, seeds its own pack fixture (fixing the `name 'first' is not
+  defined` NameError on fresh machines), and no longer crashes under the
+  cp1252 console (a UnicodeEncodeError was being misreported as a UI
+  failure).
+- **Updater hardening.** Installer downloads write to a `.partial` file and
+  atomically promote only after size + SHA-256 verification, deleting on
+  every failure path (previously the size-cap path unlinked the still-open
+  file — WinError 32 on Windows — and left a partial executable). The feed
+  cap is enforced while streaming, and the 0-hour throttle boundary is exact.
+- **Test-harness fixes.** autocheck_toggle_test now patches the binding
+  `_auto_check_update` actually consults; density_home_test compares the
+  same pack across Home/Library and measures at a width where Cozy and
+  Compact express distinct layouts; shader_swap_test waits for the async
+  retest instead of reading its own TESTING marker.
+- **Provenance.** The v1.0.22 tag pointed at a CI screenshot commit whose
+  source still said 1.0.21. The tag now resolves to the real 1.0.22 source
+  (113bedd), and this release is built from a clean checkout of its own tag.
+
 ## 2026-08-14 — 1.0.22: polish + QA round (WCAG cards, update-feed hardening)
 
 - **Keyboard-accessible cards (WCAG).** Pack tiles (Library + Home),

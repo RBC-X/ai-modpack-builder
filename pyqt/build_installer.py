@@ -28,7 +28,10 @@ ROOT = HERE.parent                              # project root
 sys.path.insert(0, str(HERE))
 from product_config import APP_VERSION  # noqa: E402
 
-VENV_PY = HERE / ".venv" / "Scripts" / "python.exe"
+# Toolchain interpreter: the clean-checkout release builds reuse the shared
+# development venv via AMB_VENV_PY (the venv is toolchain, not source — a
+# git worktree checkout has no .venv of its own).
+VENV_PY = Path(os.environ.get("AMB_VENV_PY") or (HERE / ".venv" / "Scripts" / "python.exe"))
 SPEC = HERE / "installer" / "amb.spec"
 ISS = HERE / "installer" / "installer.iss"
 APP_DIR = ROOT / "dist" / "AI Modpack Builder"

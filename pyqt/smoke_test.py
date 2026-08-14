@@ -4,14 +4,40 @@ engine is reachable and real builds render. Run with:
     pyqt/.venv/Scripts/python pyqt/smoke_test.py
 
 No windows are shown (QT_QPA_PLATFORM=offscreen); PASS/FAIL printed per step.
+
+Clean-workspace isolation: the test always runs against a throwaway
+AMB_WORKSPACE seeded with one minimal completed pack, so it never depends on
+a developer's prior %LOCALAPPDATA% / pyqt/state.json / workspace data, and
+the pack-detail assertions always have a deterministic fixture.
 """
+import json
 import os
+import shutil
 import sys
+import tempfile
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["AMB_DISABLE_CATALOG_WARMUP"] = "1"
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+
+# Console encoding is locale-dependent on Windows (cp1252 can't encode the
+# '→' characters some UI strings contain); the harness must never crash on
+# log output, so tolerate undecodable characters instead of failing.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+from pathlib import Path
+
+# Throwaway workspace: every smoke run is a fresh install, seeded with one
+# minimal real pack record so pack-detail assertions always have a fixture.
+_WORK = Path(tempfile.mkdtemp(prefix="amb-smoke-"))
+os.environ["AMB_WORKSPACE"] = str(_WORK)
 
 from PyQt6.QtWidgets import QApplication, QCheckBox, QLabel, QLineEdit, QPushButton, QScrollArea  # noqa: E402
 
@@ -29,11 +55,36 @@ def check(name: str, cond: bool, extra: str = "") -> None:
     print(f"[{tag}] {name}" + (f" — {extra}" if extra else ""))
 
 
+def make_completed_pack(api, name: str, bid: str) -> str:
+    """Create a finished pack record directly (no real build) so the smoke
+    run has a deterministic fixture regardless of prior machine state."""
+    rec = {
+        "buildId": bid, "name": name, "request": "Smoke test pack",
+        "status": "done", "phase": "done", "requirements": {
+            "minecraftVersion": "1.20.1", "loader": "forge", "ramGB": 4},
+        "selections": [
+            {"provider": "modrinth", "projectId": "jei", "slug": "jei",
+             "title": "Just Enough Items", "fileId": "jei-file-1"},
+            {"provider": "modrinth", "projectId": "sodium", "slug": "sodium",
+             "title": "Sodium", "fileId": "sodium-file-1"},
+        ], "downloads": [], "graph": {"nodes": {}, "edges": []},
+        "tests": [], "testResult": {"status": "PASS", "level": "standard"},
+        "conflicts": [], "repairs": [], "exports": [], "packStats": {"modCount": 12},
+        "settings": {}, "perfEstimate": None, "finalReport": "ok", "error": None,
+        "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    api._s._write_record(rec)
+    return bid
+
+
 app = QApplication(sys.argv)
 theme.setup_fonts(app)
 
 api = PyEngine()
 check("in-process engine healthy", api.health())
+_seed_bid = make_completed_pack(api, "Smoke Fixture Pack", "b-smoke-fixture")
+check("clean workspace seeded with a pack fixture", bool(_seed_bid))
 
 win = MainWindow(api)
 win.resize(1320, 840)
@@ -49,19 +100,20 @@ for _ in range(80):
 
 builds = win.builds
 check("builds loaded from engine", len(builds) > 0, f"{len(builds)} packs")
+# `first` is always defined: the seeded fixture guarantees at least one pack
+# even on a brand-new machine (previously a NameError on clean workspaces).
+first = next((build for build in builds if build.get("modCount", 0) > 0), builds[0])
 check("launcher sidebar width matches reference", win.sidebar.width() == 224, f"{win.sidebar.width()} px")
 check("launcher top bar height matches reference", win.topbar.height() == 50, f"{win.topbar.height()} px")
 
-if builds:
-    first = next((build for build in builds if build.get("modCount", 0) > 0), builds[0])
-    check("first pack has a name", bool(first.get("name")))
-    check("first pack has mod count", first.get("modCount", 0) > 0)
-    rec = api.build(first["buildId"])
-    check("build record fetched", bool(rec.get("buildId")))
-    check("record has selections or visuals",
-          bool(rec.get("selections")) or bool(rec.get("visualSelections")))
-    worlds = api.worlds(first["buildId"])
-    check("worlds endpoint responds", isinstance(worlds, list))
+check("first pack has a name", bool(first.get("name")))
+check("first pack has mod count", first.get("modCount", 0) > 0)
+rec = api.build(first["buildId"])
+check("build record fetched", bool(rec.get("buildId")))
+check("record has selections or visuals",
+      bool(rec.get("selections")) or bool(rec.get("visualSelections")))
+worlds = api.worlds(first["buildId"])
+check("worlds endpoint responds", isinstance(worlds, list))
 
 for nav in ["home", "library", "discover", "ai-builder", "downloads", "activity", "settings"]:
     try:

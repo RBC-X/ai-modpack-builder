@@ -122,13 +122,18 @@ req = rec.get("requirements") or {}
 check("requirements.shaders set", bool(req.get("shaders")))
 check("requirements.shaderQuality set", req.get("shaderQuality") == "performance", str(req.get("shaderQuality")))
 
-# give the async retest thread a moment to consume the patched fn
-import threading as _th
-for _ in range(60):
-    if rec.get("testResult"):
+# give the async retest thread a moment to consume the patched fn. The
+# swap writes testResult.status="TESTING" synchronously, so the poll must
+# wait for a NON-TESTING status — checking for the mere presence of
+# testResult exits on the first read (the bug this loop fixes).
+import threading as _th  # noqa: F401
+_deadline = time.time() + 20
+while time.time() < _deadline:
+    rec = eng.build(build_id)
+    _st = (rec.get("testResult") or {}).get("status")
+    if _st not in (None, "TESTING"):
         break
     time.sleep(0.25)
-    rec = eng.build(build_id)
 check("retest ran and recorded a result", (rec.get("testResult") or {}).get("status") == "PASS",
       json_dump((rec.get("testResult") or {}).get("status")))
 env = _captured.get("env") or {}

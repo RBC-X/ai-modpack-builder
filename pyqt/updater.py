@@ -133,6 +133,14 @@ def check(url: str, timeout: int = 20) -> dict:
 def download(url: str, dest_dir: Path, sha256: str = "", max_mb: int = DEFAULT_MAX_INSTALLER_MB) -> Path:
     """Stream the installer to dest_dir with a size cap and SHA-256 verify.
 
+    The bytes are streamed to a uniquely named `.partial` file and promoted
+    to the final name with an atomic rename only AFTER size and SHA-256
+    verification pass — a half-downloaded file is never left under the
+    installer name. Every failure path (size cap, hash mismatch, network
+    error mid-download) closes the handle first, then removes the partial;
+    on Windows an in-use file cannot be unlinked, so close-before-unlink is
+    mandatory or the cleanup itself would mask the real error (WinError 32).
+
     Returns the downloaded path. Raises on size-limit or hash mismatch.
     """
     _validate_url(url)
@@ -140,30 +148,44 @@ def download(url: str, dest_dir: Path, sha256: str = "", max_mb: int = DEFAULT_M
     dest_dir.mkdir(parents=True, exist_ok=True)
     name = Path(urllib.request.urlparse(url).path).name or "update-installer.exe"
     dest = dest_dir / name
+    # Unique partial name: concurrent runs / stale leftovers can never collide.
+    partial = dest_dir / f".{name}.{os.getpid()}.partial"
     h = hashlib.sha256()
     total = 0
     over_limit = False
-    with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
-        with open(dest, "wb") as f:
-            while True:
-                chunk = resp.read(65536)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > max_mb * 1024 * 1024:
-                    over_limit = True
-                    break
-                h.update(chunk)
-                f.write(chunk)
-    # Both failure paths unlink only after the file handle is closed — on
-    # Windows an in-use file cannot be removed, which would otherwise mask
-    # the real error and leave a partial installer behind.
+    write_ok = False
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
+            with open(partial, "wb") as f:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_mb * 1024 * 1024:
+                        over_limit = True
+                        break
+                    h.update(chunk)
+                    f.write(chunk)
+                write_ok = True
+    except Exception:
+        # Network/read error mid-download: leave no partial behind, then
+        # re-raise the ORIGINAL error (never mask it with cleanup failure).
+        try:
+            if partial.exists():
+                partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     if over_limit:
-        dest.unlink(missing_ok=True)
+        # The `with open` block already closed the handle; safe to unlink.
+        partial.unlink(missing_ok=True)
         raise ValueError(f"installer exceeds {max_mb} MB size cap")
-    if h.hexdigest().lower() != sha256:
-        dest.unlink(missing_ok=True)
+    if not write_ok or h.hexdigest().lower() != sha256:
+        partial.unlink(missing_ok=True)
         raise ValueError(f"SHA-256 mismatch: expected {sha256}, got {h.hexdigest()}")
+    # Verified: atomically promote the partial to the real installer name.
+    os.replace(partial, dest)
     return dest
 
 

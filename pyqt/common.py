@@ -292,16 +292,26 @@ def card(parent: QWidget, hover: bool = False) -> QFrame:
 
 
 def make_clickable(card_widget: QFrame, activate: Callable[[], None],
-                   name: str = "") -> QFrame:
+                   name: str = "", description: str = "") -> QFrame:
     """Make a QFrame card keyboard-reachable (WCAG): tab-focusable, activating
-    on Enter/Space exactly like a click, with a tooltip that doubles as the
-    screen-reader accessible name. `activate` must be the same handler the
-    click uses; the mouse event is kept as-is for pointer users.
+    on Enter/Space exactly like a click. The accessible name is set through
+    Qt's accessibility API (setAccessibleName) — never tooltip alone, because
+    screen readers read the accessible name directly and the tooltip is not
+    reliably surfaced. The tooltip is still set for pointer users. `activate`
+    must be the same handler the click uses; the mouse event is kept as-is.
+
+    Nested interactive children (PLAY / manage / delete buttons) keep their
+    own focus and key handling: key events are delivered to the focused child
+    first, so Enter/Space on a child button triggers only that button, while
+    Enter/Space when the card itself is focused triggers the card action.
     """
     card_widget.setFocusPolicy(Qt.FocusPolicy.TabFocus)
     card_widget.setCursor(Qt.CursorShape.PointingHandCursor)
     if name:
+        card_widget.setAccessibleName(name)
         card_widget.setToolTip(name)
+    if description:
+        card_widget.setAccessibleDescription(description)
 
     def _key(e) -> None:
         if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
