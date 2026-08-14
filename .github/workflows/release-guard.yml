@@ -1,0 +1,32 @@
+name: Release guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: release-guard-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The guard verifies the current version's tag against its source
+          # commit, so full history + tags must be present (default is a
+          # shallow, tagless checkout).
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Release preflight guard
+        run: python pyqt/release.py --guard

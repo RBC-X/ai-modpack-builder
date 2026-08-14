@@ -36,11 +36,17 @@ Flags:  --repo OWNER/REPO   (default RBC-X/ai-modpack-builder)
         --no-gallery        skip the screenshot re-render
         --no-publish        build + verify only, no gh release
         --dry-run           stop before the build
+        --guard             CI-safe preflight only (no build): working tree
+                            clean + current-version tag points at a commit
+                            carrying that same APP_VERSION and reachable from
+                            HEAD. Run on every push so a mis-tagged release
+                            fails before publishing.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -99,6 +105,52 @@ def _run(cmd: list[str], cwd: Path | None = None, env=None, timeout: int = 3600)
     return r.returncode
 
 
+def _guard(version: str) -> int:
+    """CI-safe preflight, run on every push so a mis-tagged release fails
+    BEFORE publishing. It audits only the CURRENT version's tag - legacy tags
+    (pre-1.0.21) predate strict provenance and are not re-litigated here:
+
+      1. the working tree is clean,
+      2. if v<version> exists, the commit it points at carries the SAME
+         APP_VERSION in its own source (the v1.0.22 failure class: a tag
+         pointing at a commit that says a different version), and
+      3. that commit is reachable from HEAD (the release is in main's
+         history, not an orphaned/force-moved tag).
+    """
+    dirty = _git("status", "--porcelain")
+    if dirty.stdout.strip():
+        log(f"[guard] FAIL - working tree is NOT clean "
+            f"({len(dirty.stdout.splitlines())} uncommitted paths)")
+        return 1
+    tag = f"v{version}"
+    try:
+        tag_rev = _git_out("rev-parse", f"{tag}^{{}}")
+    except RuntimeError:
+        log(f"[guard] PASS - tag {tag} does not exist yet (version bumped, "
+            "not released) - nothing to verify")
+        return 0
+    head = _git_out("rev-parse", "HEAD")
+    src = _git("show", f"{tag}:pyqt/product_config.py")
+    if src.returncode != 0:
+        log(f"[guard] FAIL - tag {tag} points at {tag_rev[:10]} whose source "
+            "has no pyqt/product_config.py (wrong tag)")
+        return 1
+    m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', src.stdout)
+    tagged = m.group(1) if m else ""
+    if tagged != version:
+        log(f"[guard] FAIL - tag {tag} points at {tag_rev[:10]} whose source "
+            f"carries APP_VERSION {tagged!r}, not {version!r} (mis-tagged - "
+            "the v1.0.22 failure class)")
+        return 1
+    if _git("merge-base", "--is-ancestor", tag_rev, head).returncode != 0:
+        log(f"[guard] FAIL - tag {tag} ({tag_rev[:10]}) is not reachable from "
+            f"HEAD ({head[:10]})")
+        return 1
+    log(f"[guard] PASS - tag {tag} -> {tag_rev[:10]}, source APP_VERSION "
+        f"{version!r}, ancestor of HEAD ({head[:10]})")
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     version = next((args[i + 1] for i, a in enumerate(args) if a == "--version"), None)
@@ -114,6 +166,9 @@ def main() -> int:
     tag = f"v{version}"
     installer_name = f"AI-Modpack-Builder-Setup-{version}.exe"
     sys.path.insert(0, str(HERE))
+
+    if "--guard" in args:
+        return _guard(version)
 
     # ---- 0. Preconditions -------------------------------------------------
     if not VENV_PY.exists():
