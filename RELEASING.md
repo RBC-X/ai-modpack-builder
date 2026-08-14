@@ -89,6 +89,12 @@ Correction (documented supersession, no history rewrite):
   actually produced the published 1.0.22 installer (fixes + tests present,
   `APP_VERSION = "1.0.22"`). GitHub's release page and source archives for
   v1.0.22 now resolve to that commit.
+- Rebase reconciliation: if main is ever rebased after a release, the
+  release tag lands on an orphaned commit (same tree, new hash). The
+  release-guard CI catches this; reconcile by re-pointing the tag at its
+  in-history twin (`git tag -f vX.Y.Z <rebased-hash> && git push --force
+  origin refs/tags/vX.Y.Z`). The shipped installer is unaffected (trees
+  match in source).
 - Every release from 1.0.23 on is **built from a clean checkout of its own
   tag** (`git worktree add` at the tagged commit), so the tag can never drift
   from the shipped bits again. The build reuses the shared toolchain venv via

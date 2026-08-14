@@ -42,7 +42,7 @@ EMBEDDED_CURSEFORGE_KEY = _embedded_cf_key()
 # pipeline (pyqt/build_installer.py) reads this for the Inno Setup
 # MyAppVersion define, and the self-updater compares it against the update
 # feed. Bump it for every release.
-APP_VERSION = "1.0.23"
+APP_VERSION = "1.0.24"
 
 # Default self-update feed for installed builds. Fresh installs auto-point
 # at this HTTPS feed (Settings → Updates prefills it; the startup check and

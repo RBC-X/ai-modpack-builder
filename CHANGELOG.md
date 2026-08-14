@@ -1,6 +1,27 @@
 # Changelog
+## 2026-08-14 — 1.0.24: one-shot release tooling + release-guard CI
+
+- **One-shot release script (`pyqt/release.py`).** One command now takes a
+  bumped version to a published, signed release: it requires a clean tree,
+  ensures the `v<ver>` tag is at HEAD (creating + pushing it), builds the
+  signed installer inside a throwaway `git worktree` of that exact tag, gates
+  on Authenticode **Valid**, refreshes the screenshot gallery, publishes the
+  release + update feed, and verifies the public feed serves the new version —
+  so a release can never drift from its source again (the 1.0.23 provenance
+  rule made mechanical).
+- **Release-guard CI.** A new workflow runs `release.py --guard` on every push
+  and PR: the current version's tag, if it exists, must point at a commit
+  whose own source carries the same `APP_VERSION` and must be reachable from
+  HEAD. The guard caught a real drift immediately (the post-rebase v1.0.23 tag
+  was orphaned) and it is the tripwire that makes the v1.0.22 mis-tag failure
+  class impossible to publish silently again.
+- **Tag reconciliation.** Documented in `RELEASING.md`: if main is rebased
+  after a release, re-point the release tag at its in-history twin — the
+  shipped installer is unaffected (identical source trees).
 
 ## 2026-08-14 — 1.0.23: master repair round (responsive reflow, clean-exit, provenance)
+
+ (responsive reflow, clean-exit, provenance)
 
 - **Horizontal overflow eliminated at every supported size.** Library and
   Home tiles were sized from the scroll viewport before the vertical
