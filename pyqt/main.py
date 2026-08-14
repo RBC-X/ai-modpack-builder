@@ -33,6 +33,9 @@ from views.misc import ActivityView, DownloadsView, SettingsView
 from views.overlays import (AccountModal, CrashDrawer, ImportModal, ImportOverlay,
                             LaunchOverlay, NewPackDialog)
 from views.packdetail import PackDetailView
+from views.health_mixin import HealthMixin
+from views.launch_mixin import LaunchMixin
+from views.topbar import AppTopBar
 
 NAV = [
     ("home", "Home", "home"),
@@ -48,27 +51,7 @@ TITLES = {k: v.title() for k, v, _ in NAV}
 ATTR_BY_NAV = {nid: nid.replace("-", "") for nid, _l, _i in NAV}
 
 
-class AppTopBar(QFrame):
-    """Frameless-window drag surface backed by the native system move loop."""
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton:
-            handle = self.window().windowHandle()
-            if handle is not None and handle.startSystemMove():
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton:
-            window = self.window()
-            window.showNormal() if window.isMaximized() else window.showMaximized()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
-
-
-class MainWindow(QMainWindow):
+class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
     def __init__(self, api: PyEngine):
         super().__init__()
         self.api = api
@@ -250,87 +233,6 @@ class MainWindow(QMainWindow):
         )
         self._resize_grip.raise_()
 
-    def _auto_check_update(self, stamp: str | None = None, hours: int = 24) -> None:
-        """Throttled background update check for installed builds.
-
-        Runs at startup (once per 24 h) and periodically (every 2 h while the
-        app is open) when a feed is configured (AMB_UPDATE_URL, the updateUrl
-        setting, or the embedded default); announces only if a newer version
-        is available. Silent in dev mode.
-        """
-        from engine.core import data_dir
-        import updater
-        from views.misc import _load_state
-        st = _load_state() or {}
-        if not st.get("autoCheckUpdates", True):
-            return  # "Check for updates on startup" toggle is off
-        dd = data_dir()
-        if not updater.should_auto_check(dd, hours=hours, stamp=stamp or updater.CHECK_STAMP):
-            return
-        updater.stamp_check(dd, stamp or updater.CHECK_STAMP)
-        # Priority: env override → the user's Settings URL → the embedded
-        # default feed. The default must never shadow a custom feed.
-        url = os.environ.get("AMB_UPDATE_URL", "").strip()
-        if not url:
-            url = st.get("updateUrl") or ""
-        if not url:
-            url = updater.update_url()
-        if not url:
-            return
-
-        def work():
-            return updater.check(url)
-
-        def ok(res):
-            if res.get("available"):
-                # Rich release-notes toast: title + rendered notes + a Review
-                # action that lands in Settings → Updates (notes shown, install
-                # confirmed from there). The plain-text one-liner toast is gone.
-                self.toast_update(res.get("latest") or "?",
-                                  res.get("notes") or "", self._manual_update_check)
-
-        run_async(work, ok, lambda e: None)
-
-    def _periodic_update_check(self) -> None:
-        """Every 2 h while the launcher is open, reuse the throttled check with
-        its own stamp so it does not collide with the once-per-24 h startup
-        check (and never fires if the user disabled auto-checks)."""
-        import updater
-        self._auto_check_update(stamp=updater.PERIODIC_STAMP, hours=2)
-
-    def _check_update_health(self) -> None:
-        """After an update applies, the next boot health-checks the engine and
-        clears the marker; a failed health probe tells the user where to roll
-        back instead of leaving them with a broken install silently."""
-        from engine.core import data_dir
-        import updater
-        from product_config import APP_VERSION as CUR_VERSION
-        from views.misc import _load_state, _save_state
-        dd = data_dir()
-        applied = updater.applied_marker(dd)
-        if not applied:
-            return
-
-        def work():
-            try:
-                return bool(self.api.health())
-            except Exception:  # noqa: BLE001
-                return False
-
-        def ok(healthy: bool) -> None:
-            if healthy:
-                if applied != CUR_VERSION:
-                    self.toast(
-                        f"Update v{applied} did not take effect — still on v{CUR_VERSION}. "
-                        "Open Settings → Updates to retry or restore the previous version.", 10000)
-                updater.clear_applied_marker(dd)
-                return
-            self.toast(
-                "The last update did not pass its health check — open Settings → Updates "
-                "and use Restore previous version.", 12000)
-
-        run_async(work, ok, lambda e: None)
-
     # ------------------------------------------------------------------
     def _build_sidebar(self) -> QFrame:
         from views.misc import _load_state
@@ -410,6 +312,19 @@ class MainWindow(QMainWindow):
                 bl.addWidget(self._dl_badge)
                 self._sb_badges.append(self._dl_badge)
             b.mousePressEvent = lambda e, n=nid: self._set_nav(n)
+            # Keyboard accessibility: the nav items are QFrames, so make them
+            # tab-reachable and activate on Enter/Space (not just clicks). The
+            # tooltip doubles as the screen-reader name.
+            b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+            def _nav_key(e, n=nid):
+                if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                    self._set_nav(n)
+                    e.accept()
+                    return
+                QFrame.keyPressEvent(b, e)
+
+            b.keyPressEvent = _nav_key
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setToolTip(nlabel)
             nv.addWidget(b)
@@ -457,6 +372,8 @@ class MainWindow(QMainWindow):
         self._sb_text_cols.append(col2)
         ab = button(acc, "", "iconbtn", "usercheck", theme.GREEN)
         ab.clicked.connect(self.account_modal.show)
+        # _refresh_account_block() sets the profile name as text + a tooltip,
+        # which together form its accessible name — nothing more needed here.
         self._acc_btn = ab
         ar.addWidget(ab)
         aw.addWidget(acc)
@@ -713,131 +630,6 @@ class MainWindow(QMainWindow):
                 and os.environ.get("AMB_DISABLE_CATALOG_WARMUP") != "1"):
             self._warm_catalogs()
 
-    def _warm_catalogs(self) -> None:
-        """Prefetch the default Discover catalogs in the background so the
-        first browse of mods / modpacks / shaders / resource packs / worlds
-        renders instantly: the API responses land in the provider disk cache
-        and the top icons in the icon cache while the user does anything else."""
-        def work() -> None:
-            combos = [
-                ("mod", "1.20.1"), ("mod", "1.21.1"), ("modpack", "1.20.1"),
-                ("shader", "1.20.1"), ("resourcepack", "1.20.1"), ("world", "1.20.1"),
-            ]
-            try:
-                for ctype, mc in combos:
-                    try:
-                        r = self.api.search(q="", provider="all", mc=mc, loader="all", type=ctype)
-                    except Exception:  # noqa: BLE001
-                        continue
-                    if r.get("error") and not r.get("hits"):
-                        continue
-                    for h in (r.get("hits") or [])[:24]:
-                        u = h.get("iconUrl")
-                        if u:
-                            icon_cache.request(u, None, 48)
-            finally:
-                self._warm_done.set()
-
-        threading.Thread(target=work, daemon=True).start()
-
-    # ------------------------------------------------------------------
-    def _check_health(self) -> None:
-        was_online = self._online
-
-        def fetch():
-            return self.api.health()
-
-        def ok(ok_: bool):
-            if ok_:
-                if not was_online:
-                    # Back online (the in-process engine is always with us) —
-                    # repopulate the views.
-                    self._retry_timer.stop()
-                    self._restart_pending = False
-                    self._restart_attempts = 0
-                    self._set_net(True, "In-process")
-                    self._net_pill.setToolTip("The Python engine runs inside this app — no separate server")
-                    self.refresh_builds()
-                    self._load_hardware()
-                else:
-                    self._set_net(True, "In-process")
-            else:
-                self._set_net(False)
-                if was_online:
-                    self.toast("Engine health check failed — retrying…")
-                self._schedule_engine_restart()
-
-        def err(_e):
-            ok(False)
-
-        run_async(fetch, ok, err)
-
-    def _set_net(self, online: bool, text: str | None = None) -> None:
-        self._online = online
-        self._net_text.setText(text if text is not None else ("Online" if online else "Offline"))
-        self._net_text.setProperty("cls", "top-mono-green" if online else "top-mono-warn")
-        theme.polish(self._net_text)
-        self._net_icon.setPixmap(icon_pixmap("wifi" if online else "wifioff",
-                                             theme.GREEN if online else theme.WARNING, 14))
-
-    # ------------------------------------------------------------------
-    # Engine auto-restart: when the health check fails, count down, start
-    # the engine, and keep retrying until the pill flips back to Online.
-    # ------------------------------------------------------------------
-    def _schedule_engine_restart(self) -> None:
-        if self._restart_pending:
-            return
-        self._restart_pending = True
-        self._retry_in = 15 if self._restart_attempts >= 3 else 5
-        self._net_pill.setToolTip("The launcher engine is down — the launcher restarts it automatically.")
-        self._retry_timer.start()
-        self._set_net(False, f"Offline · retry {self._retry_in}s")
-
-    def _retry_tick(self) -> None:
-        if not self._restart_pending:
-            self._retry_timer.stop()
-            return
-        self._retry_in -= 1
-        if self._retry_in <= 0:
-            self._restart_pending = False
-            self._retry_timer.stop()
-            self._try_start_engine()
-        else:
-            self._set_net(False, f"Offline · retry {self._retry_in}s")
-
-    def _try_start_engine(self) -> None:
-        self._set_net(False, "Offline · starting…")
-        self._net_pill.setToolTip("Waiting for the launcher engine to come up…")
-
-        def work():
-            # The Python engine runs inside this process, so there is no
-            # separate engine to respawn — health is authoritative.
-            return ("online", "") if self.api.health() else ("error", "in-process engine unhealthy")
-
-        def ok(res):
-            status, note = res
-            self._restart_attempts += 1
-            if status == "online":
-                self._restart_attempts = 0
-                self._set_net(True)
-                self.refresh_builds()
-            else:
-                self._set_net(False, "Offline · engine failed")
-                self._net_pill.setToolTip(f"Engine check failed: {note}")
-                self._restart_pending = False  # next health tick retries
-
-        run_async(work, ok, lambda e: self._set_net(False, "Offline · retry failed"))
-
-    def _load_hardware(self) -> None:
-        def fetch():
-            return self.api.hardware()
-
-        def ok(hw):
-            self._hardware = hw.get("effective") or {}
-            self.home.set_hardware(self._hardware)
-
-        run_async(fetch, ok, None)
-
     # ------------------------------------------------------------------
     def refresh_builds(self) -> None:
         def fetch():
@@ -1027,16 +819,6 @@ class MainWindow(QMainWindow):
         d.show()
         search.setFocus()
 
-    def _manual_update_check(self) -> None:
-        self._set_nav("settings")
-        self.settings._set_sub("updates")
-        QTimer.singleShot(200, self.settings._do_update_check)
-
-    def _redetect_hardware(self) -> None:
-        self._set_nav("settings")
-        self.settings._set_sub("minecraft")
-        QTimer.singleShot(200, self.settings._redetect)
-
     # ------------------------------------------------------------------
     def _apply_theme(self, pref: str) -> None:
         """Re-theme the whole window after an Appearance change."""
@@ -1114,221 +896,6 @@ class MainWindow(QMainWindow):
     def _reload_detail(self, build_id: str) -> None:
         rec = self.records.get(build_id)
         self.packdetail.load(build_id, rec)
-
-    # ------------------------------------------------------------------
-    # Launcher
-    # ------------------------------------------------------------------
-    def _launch_identity(self) -> tuple[str | None, dict | None]:
-        """Resolve the selected account inside a worker thread before launch."""
-        from views.misc import _load_state
-        st = _load_state()
-        if st.get("accountMode") == "microsoft":
-            client_id = minecraft_auth.configured_client_id()
-            return None, minecraft_auth.get_minecraft_session(client_id)
-        username = str(st.get("accountName") or "").strip()
-        return username or None, None
-
-    def play(self, build_id: str) -> None:
-        if not build_id:
-            return
-        # Concurrent packs are allowed: each launch has its own isolated
-        # instance, pid, launch state and logs. The overlay tracks the most
-        # recently launched pack; per-pack status is on Pack Detail.
-        self._launching = build_id
-        self._launch_ui_applied = False
-        name = next((b.get("name") for b in self.builds if b.get("buildId") == build_id), "pack")
-        self.launch_overlay.show_launch(name, build_id)
-        self.toast(f"Launching {name}…")
-
-        def fetch():
-            username, auth = self._launch_identity()
-            return self.api.play(build_id, username, auth)
-
-        def ok(res):
-            self.toast(f"Launched (pid {res.get('pid')})")
-            self._poll.start()
-
-        def err(e):
-            self.launch_overlay.apply_status({"error": str(e), "phase": "error"})
-            self.toast(f"[launch] {e}")
-
-        run_async(fetch, ok, err)
-
-    def stop(self, build_id: str) -> None:
-        def fetch():
-            return self.api.stop(build_id)
-
-        def ok(res):
-            self.toast("Stopped instance.")
-            self._poll.stop()
-            self.launch_overlay.hide()
-            self.crash_drawer.hide()
-            self._launching = None
-            self.refresh_builds()
-
-        def err(e):
-            self.toast(f"[stop] {e}")
-
-        run_async(fetch, ok, err)
-
-    def _poll_launch(self) -> None:
-        if not self._launching:
-            self._poll.stop()
-            return
-        bid = self._launching
-
-        def fetch():
-            return self.api.status(bid)
-
-        def ok(st):
-            self.launch_overlay.apply_status(st)
-            if self.detail_pack_id == bid:
-                self.packdetail.set_status(st)
-            err = st.get("error")
-            if not st.get("running") and not st.get("starting") and (st.get("phase") in (None, "stopped", "idle") or err):
-                self._poll.stop()
-                self.refresh_builds()
-                # On a crash keep _launching set so the crash drawer (VIEW
-                # CRASH REPORT / ADD MISSING MODS) still works; only a stop()
-                # or a new play() clears it.
-                if not err:
-                    QTimer.singleShot(1200, self.launch_overlay.hide)
-            if st.get("running"):
-                if not self._launch_ui_applied:
-                    from views.misc import _load_state
-                    launcher_state = _load_state()
-                    self._launch_ui_applied = True
-                    if launcher_state.get("closeOnLaunch"):
-                        self.close()
-                    elif launcher_state.get("minimizeOnLaunch"):
-                        self.showMinimized()
-                self.refresh_builds()
-
-        def err(e):
-            self._poll.stop()
-            self.launch_overlay.hide()
-            self.toast(f"[status] {e}")
-
-        run_async(fetch, ok, err)
-
-    def _open_crash_drawer(self) -> None:
-        if not self._launching:
-            return
-
-        def fetch():
-            return self.api.status(self._launching)
-
-        def ok(st):
-            name = next((b.get("name") for b in self.builds if b.get("buildId") == self._launching), "pack")
-            self.crash_drawer.show_report(self._launching, st, name)
-
-        run_async(fetch, ok, None)
-
-    def fix_missing(self) -> None:
-        bid = self._launching or self.crash_drawer._build_id
-        if not bid:
-            return
-        self.crash_drawer.hide()
-        self.toast("Adding missing mods & relaunching…")
-        self.launch_overlay.show_launch("repair", bid)
-
-        def fetch():
-            username, auth = self._launch_identity()
-            return self.api.add_missing(bid, username=username, auth=auth)
-
-        def ok(res):
-            self.toast(res.get("summary") or "Dependencies added — relaunching.")
-            if res.get("relaunch"):
-                # add_missing terminated the stale crashed JVM; honour the
-                # button label and actually start the game again.
-                self.play(bid)
-                return
-            self._launching = bid
-            self._poll.start()
-            self.refresh_builds()
-
-        def err(e):
-            self.toast(f"[repair] {e}")
-            self.launch_overlay.hide()
-
-        run_async(fetch, ok, err)
-
-    def repair(self, build_id: str) -> None:
-        self.toast("Running full repair & relaunch (crash logs → root cause → fix → retest)…")
-        self.launch_overlay.show_launch("repair scan", build_id)
-        self._launching = build_id
-
-        def fetch():
-            username, auth = self._launch_identity()
-            return self.api.fix(build_id, username=username, auth=auth)
-
-        def ok(res):
-            self.toast(res.get("summary") or "Repair finished.")
-            self._poll.start()
-            self.refresh_builds()
-
-        def err(e):
-            self.toast(f"[repair] {e}")
-            self.launch_overlay.hide()
-            self._poll.start()
-
-        run_async(fetch, ok, err)
-
-    # ------------------------------------------------------------------
-    # Mod management
-    # ------------------------------------------------------------------
-    def add_mod(self, build_id: str, provider: str, project_id: str, _version_id, mtype) -> None:
-        if not build_id:
-            self.toast("Pick a target pack first (see Discover drawer).")
-            return
-        self.toast(f"Adding {project_id} to pack — resolving dependencies…")
-
-        def fetch():
-            return self.api.add_mod(build_id, provider, project_id, type=mtype)
-
-        def ok(res):
-            added = [a.get("title") for a in (res.get("added") or [])]
-            deps = [a.get("title") for a in (res.get("dependencies") or [])]
-            msg = f"Added {', '.join(added)}" + (f" + deps {', '.join(deps)}" if deps else "")
-            self.toast(msg or "Mod added.")
-            self.refresh_builds()
-            if self.detail_pack_id == build_id:
-                self._reload_detail(build_id)
-
-        def err(e):
-            self.toast(f"[add] {e}")
-
-        run_async(fetch, ok, err)
-
-    def remove_mod(self, build_id: str, slug: str, mtype) -> None:
-        def fetch():
-            return self.api.remove_mod(build_id, slug, type=mtype)
-
-        def ok(res):
-            self.toast(f"Removed {slug}.")
-            self.refresh_builds()
-            if self.detail_pack_id == build_id:
-                self._reload_detail(build_id)
-
-        def err(e):
-            self.toast(f"[remove] {e}")
-
-        run_async(fetch, ok, err)
-
-    def retest(self, build_id: str) -> None:
-        self.toast("Re-testing pack (real launch)…")
-
-        def fetch():
-            return self.api.retest(build_id)
-
-        def ok(res):
-            self.toast(res.get("summary") or f"Re-test: {res.get('status')}")
-            self.refresh_builds()
-
-        def err(e):
-            self.toast(f"[retest] {e}")
-
-        run_async(fetch, ok, err)
 
     def import_pack(self, provider: str, project_id: str) -> None:
         self._run_import(f"Importing {project_id}…",

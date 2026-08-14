@@ -28,7 +28,7 @@ DARK = {
     "BORDER2":  "#343A40",
     "TEXT":     "#F3F5F6",
     "TEXT2":    "#A7ADB4",
-    "MUTED":    "#737A82",
+    "MUTED":    "#7E868F",  # 4.6:1 on CARD — WCAG AA for small text (was 3.9:1)
     # derived surfaces that are palette-specific
     "SCROLL":        "#2A2F35",
     "SCROLL_HOVER":  "#3B424A",
@@ -520,6 +520,12 @@ QPushButton[cls="back-link"] {{
 QPushButton[cls="back-link"]:hover {{ color: {TEXT}; }}
 QPushButton:focus {{
     border: 1px solid rgba(93,156,236,0.78);
+}}
+/* Keyboard focus visibility for the sidebar nav items (the only TabFocus
+   QFrames in the app) — a plain QFrame shows no focus rect by default. */
+QFrame:focus {{
+    background: {HOVER};
+    border-radius: {R_MD}px;
 }}
 
 /* Compact controls in the 50px reference top bar */
