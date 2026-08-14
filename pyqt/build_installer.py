@@ -231,6 +231,10 @@ def main() -> int:
     report["signed"] = sign
     report["elapsedSec"] = round(time.time() - t0)
     out = ROOT / "workspace" / "installer-build-result.json"
+    # A clean checkout has no workspace/ dir (it is git-ignored runtime data) —
+    # create it so the build's own summary write cannot fail after every phase
+    # has already passed.
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2), "utf-8")
     print(f"\n[build] OVERALL: {report['overall']} — installer: {setup}", flush=True)
     print(f"[build] report: {out}", flush=True)
