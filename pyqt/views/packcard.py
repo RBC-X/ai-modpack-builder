@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel,
 
 import theme
 from common import (avatar, button, fmt_ago, hbox, icon_btn, icon_pixmap,
-                    label, pill, vbox)
+                    label, make_clickable, pill, vbox)
 from common import icon_cache
 
 DENSITY_PARAMS = {
@@ -165,4 +165,6 @@ def build_pack_card(parent: QWidget, b: dict, card_w: int, *,
 
     if on_click is not None:
         c.mousePressEvent = lambda e, bid=b.get("buildId"): on_click(e, bid)
+        make_clickable(c, lambda: on_click(None, b.get("buildId")),
+                       name=f"Open {b.get('name') or 'pack'}")
     return c

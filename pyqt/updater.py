@@ -82,10 +82,18 @@ def update_url() -> str:
 def fetch_feed(url: str, timeout: int = 20) -> dict:
     """GET the update feed and validate its shape."""
     _validate_url(url)
+    chunks: list[bytes] = []
+    total = 0
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
-        raw = resp.read()
-    if len(raw) > 2 * 1024 * 1024:
-        raise ValueError("update feed too large")
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 2 * 1024 * 1024:
+                raise ValueError("update feed too large")
+            chunks.append(chunk)
+    raw = b"".join(chunks)
     data = json.loads(raw.decode("utf-8"))
     if not isinstance(data, dict) or not str(data.get("version") or "").strip():
         raise ValueError("update feed missing 'version'")
@@ -134,6 +142,7 @@ def download(url: str, dest_dir: Path, sha256: str = "", max_mb: int = DEFAULT_M
     dest = dest_dir / name
     h = hashlib.sha256()
     total = 0
+    over_limit = False
     with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
         with open(dest, "wb") as f:
             while True:
@@ -142,10 +151,16 @@ def download(url: str, dest_dir: Path, sha256: str = "", max_mb: int = DEFAULT_M
                     break
                 total += len(chunk)
                 if total > max_mb * 1024 * 1024:
-                    dest.unlink(missing_ok=True)
-                    raise ValueError(f"installer exceeds {max_mb} MB size cap")
+                    over_limit = True
+                    break
                 h.update(chunk)
                 f.write(chunk)
+    # Both failure paths unlink only after the file handle is closed — on
+    # Windows an in-use file cannot be removed, which would otherwise mask
+    # the real error and leave a partial installer behind.
+    if over_limit:
+        dest.unlink(missing_ok=True)
+        raise ValueError(f"installer exceeds {max_mb} MB size cap")
     if h.hexdigest().lower() != sha256:
         dest.unlink(missing_ok=True)
         raise ValueError(f"SHA-256 mismatch: expected {sha256}, got {h.hexdigest()}")
@@ -235,7 +250,7 @@ def should_auto_check(data_dir: Path, hours: int = 24, stamp: str = CHECK_STAMP)
     try:
         import time
         age = time.time() - float(stamp_path.read_text().strip())
-        return age > hours * 3600
+        return age >= hours * 3600  # hours=0 -> always allowed (no wait)
     except Exception:  # noqa: BLE001
         return True
 

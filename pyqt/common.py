@@ -291,6 +291,29 @@ def card(parent: QWidget, hover: bool = False) -> QFrame:
     return w
 
 
+def make_clickable(card_widget: QFrame, activate: Callable[[], None],
+                   name: str = "") -> QFrame:
+    """Make a QFrame card keyboard-reachable (WCAG): tab-focusable, activating
+    on Enter/Space exactly like a click, with a tooltip that doubles as the
+    screen-reader accessible name. `activate` must be the same handler the
+    click uses; the mouse event is kept as-is for pointer users.
+    """
+    card_widget.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+    card_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+    if name:
+        card_widget.setToolTip(name)
+
+    def _key(e) -> None:
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            activate()
+            e.accept()
+            return
+        QFrame.keyPressEvent(card_widget, e)
+
+    card_widget.keyPressEvent = _key
+    return card_widget
+
+
 def label(parent: QWidget, text: str = "", cls: str = "sub") -> QLabel:
     l = QLabel(text, parent)
     l.setProperty("cls", cls)

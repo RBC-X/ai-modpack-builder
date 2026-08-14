@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, fmt_downloads,
-                    hbox, icon_btn, icon_pixmap, label, pill, run_async, vbox)
+                    hbox, icon_btn, icon_pixmap, label, make_clickable, pill,
+                    run_async, vbox)
 from common import icon_cache
 from icons import icon
 from views.misc import _load_state, _save_state
@@ -686,6 +687,8 @@ class DiscoverView(QWidget):
         card_lay.addLayout(bottom)
 
         project_card.mousePressEvent = lambda event, selected=hit: self._open_drawer(selected)
+        make_clickable(project_card, lambda: self._open_drawer(hit),
+                       name=f"Details for {hit.get('title') or hit.get('slug') or 'project'}")
         return project_card
 
     # ------------------------------------------------------------------

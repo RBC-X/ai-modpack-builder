@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
-                    label, pill, vbox)
+                    label, make_clickable, pill, vbox)
 from views.misc import _load_state, _save_state
 from views.packcard import DENSITY_PARAMS, build_pack_card
 
@@ -295,6 +295,8 @@ class LibraryView(QWidget):
         trash.clicked.connect(lambda: self.delete_requested.emit(b.get("buildId")))
         row.addWidget(trash)
         c.mousePressEvent = lambda e, bid=b.get("buildId"): self._clicked(e, bid)
+        make_clickable(c, lambda: self._clicked(None, b.get("buildId")),
+                       name=f"Select {b.get('name') or 'pack'}")
         return c
 
     def _clicked(self, event, bid: str) -> None:

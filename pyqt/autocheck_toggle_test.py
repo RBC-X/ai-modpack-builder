@@ -17,6 +17,7 @@ app = QApplication([])
 
 import updater
 import views.misc as misc
+import views.health_mixin as health_mixin
 import main as m
 
 CALLS = []
@@ -30,6 +31,9 @@ def fake_check(url, timeout=20):
 updater.check = fake_check
 updater.should_auto_check = lambda dd, hours=24, stamp=None: True
 updater.stamp_check = lambda dd, stamp=None: None
+# _auto_check_update lives in HealthMixin (views/health_mixin.py) and calls the
+# module-global run_async there — patch that binding, not main's.
+health_mixin.run_async = lambda fn, on_ok, on_err=None: on_ok(fn())
 m.run_async = lambda fn, on_ok, on_err=None: on_ok(fn())
 
 

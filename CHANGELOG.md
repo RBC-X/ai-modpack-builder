@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-08-14 — 1.0.22: polish + QA round (WCAG cards, update-feed hardening)
+
+- **Keyboard-accessible cards (WCAG).** Pack tiles (Library + Home),
+  starter-concept cards, and Discover project cards were mouse-only — a
+  keyboard user could not reach or activate them. All are now tab-focusable
+  and activate on Enter/Space exactly like a click, with tooltips as
+  accessible names. Verified end-to-end offscreen (selection, editor
+  invocation, navigation).
+- **Update-feed hardening.** A hostile/oversized feed is now rejected with
+  a streaming 2 MB cap instead of being buffered whole into memory; the
+  installer size-cap path no longer crashes with WinError 32 on Windows
+  (it tried to delete an open file) and no longer leaves a partial
+  installer behind; the auto-check throttle boundary is exact, so a 0-hour
+  interval always means "check now".
+- **New regression suites.** `update_feed_edge_test` (23 checks: malformed
+  feeds, version pinning, SHA/size cleanup, rollback selection, throttles,
+  network failure) and `wcag_cards_test` (10 checks across Library, Home,
+  Discover, and the sidebar nav).
+- **Test-harness fix.** The auto-check toggle test patched `main.run_async`
+  but the method moved to `views/health_mixin.py` in 1.0.21, so the patch
+  silently stopped intercepting it (the check fired on a real thread and
+  the test asserted too early). It now patches the module the method
+  actually consults — the production behavior was never broken.
+
 ## 2026-08-14 — 1.0.21: module split, WCAG pass, fresh-workspace DB fix
 
 - **Fresh-workspace database fix (CI-caught).** The engine's SQLite store

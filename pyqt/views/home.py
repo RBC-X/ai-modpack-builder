@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTex
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
-                    icon_pixmap, label, pill, vbox)
+                    icon_pixmap, label, make_clickable, pill, vbox)
 from views.misc import _load_state
 from views.packcard import DENSITY_PARAMS, build_pack_card
 
@@ -242,6 +242,8 @@ class HomeView(QWidget):
         col.addWidget(use)
         row.addLayout(col, 1)
         c.mousePressEvent = lambda e, cp=concept: self._open_concept_editor(cp)
+        make_clickable(c, lambda: self._open_concept_editor(concept),
+                       name=f"Use {concept.get('title') or 'starter'} template")
         return c
 
     def _surprise_me(self) -> None:
