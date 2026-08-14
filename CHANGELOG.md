@@ -1,4 +1,21 @@
 # Changelog
+## 2026-08-14 — 1.0.25: self-healing releases + resilient auto-update
+
+- **Releases can no longer be blocked or orphaned by the CI screenshot bot.**
+  `release.py` now rebases `-X ours` onto origin/main before tagging and again
+  before its final push, then re-points the release tag at its in-history
+  twin, so a one-command release survives a concurrent bot commit every time
+  (previously the final push could be rejected and the tag left orphaned).
+- **Auto-update retries transient CDN stale copies.** If the installer's
+  Authenticode check flakily reports Unknown (an edge-cache serving a stale
+  build — seen on the 1.0.24 round), the updater re-downloads from scratch and
+  retries verify + apply exactly once before failing; genuine errors are never
+  retried. The updater edge suite grew to 27 checks covering the retry
+  contract (exactly one re-download, no partial residue, no retry for real
+  failures).
+- **Release-guard CI now runs on tag pushes too.** A version tag is verified
+  at the exact moment it is created, not just on the next branch push.
+
 ## 2026-08-14 — 1.0.24: one-shot release tooling + release-guard CI
 
 - **One-shot release script (`pyqt/release.py`).** One command now takes a
