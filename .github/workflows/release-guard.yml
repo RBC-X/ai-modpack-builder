@@ -3,6 +3,9 @@ name: Release guard
 on:
   push:
     branches: [main]
+    # Verify the version tag at the exact moment it is created/pushed, not
+    # just on the next branch push (a mis-tag dies here, before publish).
+    tags: ['v*']
   pull_request:
 
 concurrency:

@@ -119,6 +119,41 @@ with tempfile.TemporaryDirectory() as td:
     check("run_update reports downloaded + applied=False without apply",
           report.get("ok") and report.get("downloaded") and report.get("applied") is False)
 
+    # -- Authenticode flake retry -------------------------------------------
+    # A transient CDN stale copy makes the signature check fail once even
+    # though the SHA already matched; run_update must re-download and retry
+    # the apply exactly once, then report applied.
+    def _flaky_apply(path, extra_dir=None):
+        _flaky_apply.calls += 1
+        if _flaky_apply.calls == 1:
+            raise RuntimeError("installer Authenticode signature is not valid (Unknown)")
+        return mock.MagicMock(pid=4242)
+
+    _flaky_apply.calls = 0
+    with mock.patch.dict(os.environ, {"AMB_UPDATE_ALLOW_INSECURE": "1"}):
+        with mock.patch.object(updater, "apply_installer", side_effect=_flaky_apply) as apply_mock, \
+             mock.patch.object(updater, "download", wraps=updater.download) as dl_mock:
+            report = updater.run_update(feed.as_uri(), apply=True, dest_dir=root / "upd2")
+    check("Authenticode flake -> one retry apply, applied=True",
+          report.get("ok") and report.get("applied") is True and apply_mock.call_count == 2,
+          f"ok={report.get('ok')} applied={report.get('applied')} applies={apply_mock.call_count}")
+    check("Authenticode retry re-downloads the installer once", dl_mock.call_count == 2,
+          f"downloads={dl_mock.call_count}")
+    check("no leftover partial after retry",
+          not any((root / "upd2").glob("*.partial")))
+
+    # A non-Authenticode apply error must NOT be retried - the original
+    # failure surfaces immediately.
+    with mock.patch.dict(os.environ, {"AMB_UPDATE_ALLOW_INSECURE": "1"}):
+        with mock.patch.object(updater, "apply_installer",
+                               side_effect=RuntimeError("boom")) as apply_mock, \
+             mock.patch.object(updater, "download", wraps=updater.download) as dl_mock:
+            report = updater.run_update(feed.as_uri(), apply=True, dest_dir=root / "upd3")
+    check("non-Authenticode error is not retried",
+          report.get("ok") is False and "boom" in str(report.get("error"))
+          and apply_mock.call_count == 1 and dl_mock.call_count == 1,
+          f"ok={report.get('ok')} applies={apply_mock.call_count}")
+
     # -- rollback selection -------------------------------------------------
     pool = root / "rollback" / "updates"
     pool.mkdir(parents=True)

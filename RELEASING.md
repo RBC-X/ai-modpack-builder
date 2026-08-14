@@ -94,7 +94,10 @@ Correction (documented supersession, no history rewrite):
   release-guard CI catches this; reconcile by re-pointing the tag at its
   in-history twin (`git tag -f vX.Y.Z <rebased-hash> && git push --force
   origin refs/tags/vX.Y.Z`). The shipped installer is unaffected (trees
-  match in source).
+  match in source). `release.py` now does this automatically: it rebases
+  `-X ours` onto origin/main before tagging and again before its final
+  push, then re-points the tag at the rebased twin so the one-command
+  flow survives the CI screenshot bot's concurrent commits.
 - Every release from 1.0.23 on is **built from a clean checkout of its own
   tag** (`git worktree add` at the tagged commit), so the tag can never drift
   from the shipped bits again. The build reuses the shared toolchain venv via

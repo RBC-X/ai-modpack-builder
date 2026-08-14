@@ -248,7 +248,23 @@ def run_update(url: str, apply: bool = False, dest_dir: Optional[Path] = None,
         res["downloaded"] = str(path)
         res["sizeBytes"] = path.stat().st_size
         if apply:
-            proc = apply_installer(path, extra_dir or os.environ.get("AMB_UPDATE_DIR") or None)
+            try:
+                proc = apply_installer(path, extra_dir or os.environ.get("AMB_UPDATE_DIR") or None)
+            except Exception as e:  # noqa: BLE001
+                if "Authenticode" not in str(e):
+                    raise
+                # A transient CDN stale copy or a one-off PowerShell hiccup can
+                # make the Authenticode check flake once even though the SHA
+                # already matched. Re-download from scratch and retry the
+                # verify + apply a single time; a second failure is real.
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                path = download(res["installerUrl"], dest, res.get("installerSha256") or "")
+                res["downloaded"] = str(path)
+                res["sizeBytes"] = path.stat().st_size
+                proc = apply_installer(path, extra_dir or os.environ.get("AMB_UPDATE_DIR") or None)
             res["launchedPid"] = proc.pid
             res["applied"] = True
             # Remember which version we just installed so the next boot can

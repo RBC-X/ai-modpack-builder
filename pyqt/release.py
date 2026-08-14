@@ -105,6 +105,61 @@ def _run(cmd: list[str], cwd: Path | None = None, env=None, timeout: int = 3600)
     return r.returncode
 
 
+def _source_version(commit: str) -> str:
+    """The APP_VERSION embedded in a commit's own product_config."""
+    src = _git("show", f"{commit}:pyqt/product_config.py")
+    if src.returncode != 0:
+        return ""
+    m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', src.stdout)
+    return m.group(1) if m else ""
+
+
+def _rebased_twin(tag_rev: str, version: str) -> str | None:
+    """Find the in-history twin of an orphaned release tag after a rebase.
+
+    The twin is a commit reachable from HEAD that carries the same
+    APP_VERSION and whose tree matches the tag's tree everywhere except
+    screenshots/ (the CI bot regenerates those independently). Returns the
+    newest match, or None if nothing qualifies."""
+    tag_tree = _git("ls-tree", "-r", tag_rev)
+    if tag_tree.returncode != 0:
+        return None
+    tag_blobs = {}
+    for line in (tag_tree.stdout or "").splitlines():
+        meta, path = line.split("\t", 1)
+        tag_blobs[path] = meta.split()[2]
+    try:
+        head = _git_out("rev-parse", "HEAD")
+        commits = _git_out("rev-list", head).splitlines()
+    except RuntimeError:
+        return None
+    for c in commits:
+        if _source_version(c) != version:
+            continue
+        diff = _git("diff", "--name-only", tag_rev, c)
+        names = [n for n in (diff.stdout or "").splitlines()
+                 if not n.startswith("screenshots/")]
+        if not names:
+            return c
+    return None
+
+
+def _sync_main() -> bool:
+    """Fetch origin and rebase local-only commits onto origin/main with -X
+    ours, so the release tag is created on an up-to-date base and the final
+    push fast-forwards instead of being rejected by the CI screenshot bot's
+    concurrent commit. Returns False if the rebase fails."""
+    _git("fetch", "origin")
+    try:
+        behind = int(_git_out("rev-list", "--count", "HEAD..origin/main") or 0)
+    except (RuntimeError, ValueError):
+        return True
+    if behind <= 0:
+        return True
+    log(f"origin/main is {behind} commit(s) ahead - rebasing -X ours first")
+    return _git("pull", "--rebase", "-X", "ours", "origin", "main").returncode == 0
+
+
 def _guard(version: str) -> int:
     """CI-safe preflight, run on every push so a mis-tagged release fails
     BEFORE publishing. It audits only the CURRENT version's tag - legacy tags
@@ -178,6 +233,14 @@ def main() -> int:
     if dirty.stdout.strip():
         log("working tree is NOT clean - commit/push before releasing "
             f"(uncommitted: {len(dirty.stdout.splitlines())} paths)")
+        return 1
+
+    # ---- 0.5 Sync with origin before tagging -------------------------------
+    # The CI screenshot bot often lands a commit while the version bump is in
+    # flight; rebase -X ours up front so the tag is created on an up-to-date
+    # base and the final push fast-forwards.
+    if not dry_run and not _sync_main():
+        log("initial rebase onto origin/main failed - resolve and re-run")
         return 1
 
     # ---- 1. Tag must exist at HEAD ---------------------------------------
@@ -305,10 +368,25 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 - feed may lag the CDN briefly
             phase("public feed serves the release", False, str(e)[:120])
         # Keep origin/main in sync with the released state (the gallery commit
-        # lands after the tag was built, so push it now - best effort).
+        # lands after the tag was built). If the CI bot raced us, rebase -X
+        # ours (our gallery wins) and retry; a rebase orphans the release tag,
+        # so reconcile it to its in-history twin afterwards.
         r = _git("push", "origin", "main")
+        if r.returncode != 0:
+            log("push main rejected - syncing with origin (CI bot?) and retrying")
+            _git("pull", "--rebase", "-X", "ours", "origin", "main")
+            r = _git("push", "origin", "main")
+            if r.returncode == 0:
+                twin = _rebased_twin(_git_out("rev-parse", f"{tag}^{{}}"), version)
+                if twin:
+                    log(f"reconciling {tag} to its rebased twin {twin[:10]}")
+                    _git("tag", "-f", tag, twin)
+                    _git("push", "--force", "origin", f"refs/tags/{tag}")
+                else:
+                    phase("reconcile tag to rebased twin", False,
+                          "no in-history commit matched - run the release guard")
         phase("push main", r.returncode == 0, r.stderr.strip() or "up to date")
-        return 0
+        return 0 if r.returncode == 0 else 1
     finally:
         log(f"elapsed {time.time() - started:.0f}s - removing worktree")
         _git("worktree", "remove", str(worktree), "--force")
