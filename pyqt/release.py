@@ -207,11 +207,17 @@ def main() -> int:
 
     # ---- 2. Push the tag ---------------------------------------------------
     if not no_push_tag:
-        r = _git("push", "origin", f"refs/tags/{tag}")
+        # Force: a re-pointed tag (--force-tag) must overwrite the remote
+        # marker; the CI release-guard audits tag correctness, so a plain move
+        # is the only thing a force push can do.
+        r = _git("push", "--force", "origin", f"refs/tags/{tag}")
         phase("push tag", r.returncode == 0, r.stderr.strip() or "up to date")
 
     # ---- 3. Clean-checkout worktree ---------------------------------------
     worktree = ROOT.parent / f".release-{version}"
+    # A previously failed run can leave a partial dir and stale git metadata;
+    # prune first so `worktree add` always starts from a clean slate.
+    _git("worktree", "prune")
     if worktree.exists():
         shutil.rmtree(worktree, ignore_errors=True)
     r = _git("worktree", "add", str(worktree), tag)
@@ -298,6 +304,10 @@ def main() -> int:
                   f"version={d.get('version')} sha={str(d.get('installerSha256'))[:12]}...")
         except Exception as e:  # noqa: BLE001 - feed may lag the CDN briefly
             phase("public feed serves the release", False, str(e)[:120])
+        # Keep origin/main in sync with the released state (the gallery commit
+        # lands after the tag was built, so push it now - best effort).
+        r = _git("push", "origin", "main")
+        phase("push main", r.returncode == 0, r.stderr.strip() or "up to date")
         return 0
     finally:
         log(f"elapsed {time.time() - started:.0f}s - removing worktree")
