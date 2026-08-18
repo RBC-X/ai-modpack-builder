@@ -1,4 +1,31 @@
 # Changelog
+## 2026-08-18 — 1.0.27: async race guards + full CI gate battery
+
+- **Three out-of-order async races closed.** The library refresh
+  (`refresh_builds`, fired from 20+ sites), the launch-poll loop, and the Pack
+  Detail `load()` path could all let a *slow older* in-flight result land
+  after a *newer* one and overwrite fresh state: a stale library list,
+  A's launch status driving B's overlay, or A's record rendering under B's
+  header. Each now carries the repo's generation/bid/serial token pattern —
+  results apply only if newer than the last-applied one (the library refresh
+  specifically uses last-applied semantics, so a failing newest fetch never
+  swallows an older success).
+- **Regression guards for all three races.** `stale_refresh_test.py`,
+  `launch_poll_race_test.py`, and `packdetail_load_race_test.py` drive the
+  real `MainWindow`/`PackDetailView` adversarially (stale result lands last,
+  must be dropped; newest applies; superseded errors silent; current action
+  still completes).
+- **Full CI gate battery.** The Pages + screenshots workflow now runs all 12
+  suites on every push and PR — the three race suites plus the previously
+  manual heavy battery (bugfix regression 114, security 13, update-feed 27,
+  responsive layout, WCAG cards) — so any regression fails the job before a
+  release is ever built. (bugfix self-skips its Windows-only locked-file
+  check on the Linux runner: 113/0 there, 114/0 on Windows.)
+- **Release-gallery provenance guard.** The release-guard CI now verifies the
+  release page's screenshot assets are byte-for-byte the screenshots
+  committed at the tag, catching the non-deterministic toast-render drift
+  class.
+
 ## 2026-08-14 — 1.0.26: release-pipeline verification round
 
 - **One-shot release exercised end-to-end again.** No product code changed
