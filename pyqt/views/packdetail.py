@@ -64,6 +64,7 @@ class PackDetailView(OverviewTabMixin, ContentTabMixin, LogsTabMixin,
         self._console_built_for: str | None = None
         self._log_stop: threading.Event | None = None
         self._log_view_serial = 0
+        self._load_serial = 0      # guards out-of-order load()/worlds results
         self._live_banner = None
         self._heap_badge: QLabel | None = None
         self._heap_timer = QTimer(self)
@@ -174,6 +175,14 @@ class PackDetailView(OverviewTabMixin, ContentTabMixin, LogsTabMixin,
             self._console = None
 
     def load(self, build_id: str, record: dict | None = None) -> None:
+        # Serial token: load() is called on every pack open AND on every refresh
+        # tick while a pack is open (_reload_detail). A slow in-flight fetch for
+        # an older build must never land after a newer one and overwrite the
+        # record/worlds under the wrong header — only the LATEST load applies.
+        # (The record is keyed to build_id, so a stale build's result must never
+        # render, even if the newer load failed — same semantics as Discover's
+        # search serial.)
+        serial = self._load_serial = self._load_serial + 1
         self._stop_log_stream()
         self._console_built_for = None
         if build_id != self.build_id:
@@ -185,6 +194,8 @@ class PackDetailView(OverviewTabMixin, ContentTabMixin, LogsTabMixin,
             from common import run_async
 
             def ok_worlds(worlds):
+                if serial != self._load_serial:
+                    return  # superseded by a newer load()
                 self.worlds = worlds
                 self._refresh_tab_labels()
                 if self._tab == "worlds":
@@ -198,12 +209,16 @@ class PackDetailView(OverviewTabMixin, ContentTabMixin, LogsTabMixin,
             return self.api.build(build_id), self.api.worlds(build_id)
 
         def ok(res):
+            if serial != self._load_serial:
+                return  # superseded by a newer load()
             rec, worlds = res
             self.record = rec
             self.worlds = worlds
             self._render()
 
         def err(e):
+            if serial != self._load_serial:
+                return  # superseded by a newer load()
             self.record = {"request": f"Failed to load pack record: {e}"}
             self._render()
 
