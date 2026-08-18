@@ -57,6 +57,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.api = api
         self.builds: list[dict] = []
         self.records: dict[str, dict] = {}
+        self._refresh_gen = 0
         self.active_nav = "home"
         self.detail_pack_id: str | None = None
         self._launching: str | None = None
@@ -664,6 +665,13 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
 
     # ------------------------------------------------------------------
     def refresh_builds(self) -> None:
+        # Generation token: refresh_builds fires from 20+ sites (timer, bootstrap,
+        # build completion, launch/repair mixins), and fetches can overlap. Only the
+        # LATEST invocation may apply its result — a slow in-flight fetch landing
+        # after a newer one must be dropped, or the library regresses to stale data
+        # until the next tick.
+        gen = self._refresh_gen = self._refresh_gen + 1
+
         def fetch():
             lst = self.api.builds()
             recs = {}
@@ -675,6 +683,9 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
             return lst, recs
 
         def ok(res):
+            if gen != self._refresh_gen:
+                # A newer refresh superseded this one — never apply stale state.
+                return
             lst, recs = res
             self.builds = lst
             self.records = recs
@@ -694,7 +705,8 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
                 self._reload_detail(self.detail_pack_id)
 
         def err(e):
-            self.toast(f"[engine] {e}")
+            if gen == self._refresh_gen:
+                self.toast(f"[engine] {e}")
 
         run_async(fetch, ok, err)
 
