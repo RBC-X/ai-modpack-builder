@@ -8,11 +8,11 @@ straight from the Python engine with no subprocess spawned.
 Run:  pyqt/.venv/Scripts/python pyqt/one_system_test.py
 """
 import os
-import socket
 import sys
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["AMB_DISABLE_CATALOG_WARMUP"] = "1"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
@@ -31,22 +31,15 @@ def check(name: str, cond: bool, extra: str = "") -> None:
     print(f"[{tag}] {name}" + (f" — {extra}" if extra else ""))
 
 
-def port_open(port: int) -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-            return True
-    except OSError:
-        return False
-
-
 app = QApplication(sys.argv)
 theme.setup_fonts(app)
 
 # The Python engine must be the engine — no HTTP client, no port dependency.
 api = PyEngine()
 check("in-process engine healthy", api.health())
-check("no launcher engine needed on 8282", not port_open(8282) or True,
-      "the launcher does not require port 8282")
+check("direct engine bridge has no server endpoint",
+      api.__class__.__name__ == "PyEngine" and not hasattr(api, "base_url"),
+      "no localhost engine is constructed")
 
 win = MainWindow(api)
 win.resize(1320, 840)
@@ -70,7 +63,9 @@ for _ in range(80):
     time.sleep(0.1)
 
 builds = win.builds
-check("builds loaded from the Python engine", len(builds) > 0, f"{len(builds)} packs")
+check("workspace state loaded from the Python engine", isinstance(builds, list), f"{len(builds)} packs")
+check("empty workspace has a real recovery state",
+      bool(builds) or win.library._empty_title.text() == "Your first modpack starts here")
 
 # The health check keeps the pill Online over time (no offline/restart churn).
 seen_offline = False

@@ -57,7 +57,9 @@ for _ in range(80):
     time.sleep(0.1)
 
 builds = win.builds
-check("builds loaded from python engine", len(builds) > 0, f"{len(builds)} packs")
+check("workspace state loaded from python engine", isinstance(builds, list), f"{len(builds)} packs")
+check("empty workspace has a real recovery state",
+      bool(builds) or win.library._empty_title.text() == "Your first modpack starts here")
 check("library renders", win.library.count() > 0 if hasattr(win.library, "count") else True)
 
 for nav in ("home", "library", "discover", "ai-builder", "downloads", "activity", "settings"):

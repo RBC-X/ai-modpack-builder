@@ -53,6 +53,8 @@ jobs:
           python pyqt/health_concepts_test.py
           python pyqt/identity_ui_test.py
           python pyqt/smoke_test.py
+          python pyqt/inprocess_test.py
+          python pyqt/one_system_test.py
           python pyqt/stale_refresh_test.py
           python pyqt/launch_poll_race_test.py
           python pyqt/packdetail_load_race_test.py

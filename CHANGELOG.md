@@ -1,4 +1,25 @@
 # Changelog
+
+## 2026-08-24 — post-1.0.27 product and verification refresh
+
+- **Distinct AI Modpack Builder identity.** The native launcher shell now uses
+  the product name and package mark consistently, while preserving every route,
+  engine bridge, account flow, build action, and updater contract.
+- **Premium first-use surfaces.** Home uses real provider/build artwork when it
+  exists and an honest branded fallback when it does not. Library now separates
+  a genuinely empty workspace from a zero-result filter and offers direct Build,
+  Import, Browse, and Clear Filters recovery actions. Six locally bundled,
+  Higgsfield-generated starter images are explicitly labeled as concept previews,
+  never gameplay evidence. AI Builder is more compact and gives its primary
+  prompt a visible keyboard-focus boundary.
+- **Clean-build contract fixed.** Unsigned development installers may use the
+  zero-config Modrinth path and optional manual CurseForge setup; signed publisher
+  builds now fail fast when the required publisher key is absent.
+- **Architecture tests are hermetic.** The in-process and one-system checks now
+  accept a legitimate empty workspace and verify the direct Python bridge instead
+  of using an unconditional port assertion. Stale security paths and contradictory
+  limitation notes were reconciled with the current Python architecture.
+
 ## 2026-08-18 — 1.0.27: async race guards + full CI gate battery
 
 - **Three out-of-order async races closed.** The library refresh

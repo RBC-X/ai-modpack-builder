@@ -10,15 +10,14 @@ Honest list of what this system does **not** do (yet), and why.
   creation/load; `.mrpack`/CF/server exports with validation; compatibility
   memory; SSE live UI; repair-loop mechanics (integration-tested with a real
   crash log).
-- **Code-complete but not yet exercised live:**
-  - **Forge / NeoForge** installation (official installer route) — this is the
-    flagship 1.20.1 scenario; see PROJECT_STATUS for the live result.
-  - **Deep test mode** (client quickplay world load, GC-log heap monitoring,
-    reproducibility launch) — the code paths exist and are wired, but have not
-    produced live evidence yet.
-  - **Live repair on an organic crash** — the loop is exercised deliberately
-    (see the repair-exercise run), but no production pack has crashed
-    organically during acceptance runs.
+- **Also proven live:** Forge 1.20.1 installation and launch; deep test mode
+  across the flagship Forge and medieval Fabric packs; quickplay world load,
+  GC heap evidence and reproducibility; and repair of a real missing-dependency
+  crash. The dated evidence and machine constraints are recorded below.
+- **Still not fully generalizable:** NeoForge has automated coverage but no
+  equivalent long-form live acceptance artifact in this repository, and
+  obfuscated/reflection-heavy organic crashes can still fall back to heuristic
+  attribution.
 
 ## External constraints (cannot be solved in code)
 
@@ -91,15 +90,16 @@ the live suites, not by inspection. Full per-issue record: `BUG_FIX_AUDIT.md`.
   no manual `showEvent`); Library reflows on resize; 960px-fixed screens are
   max-width and shrink to fit 1080×700.
 
-Remaining honest gaps (unchanged by this pass):
+Remaining honest gaps from that pass (with later resolutions recorded below):
 
 - `~` (tilde) ranges now enforce an upper bound for npm-style semantics, but
   Minecraft versions are not strict SemVer; mixed-format ranges (`1.20.x`,
   snapshots) still rely on the provider's own filtering as the final judge.
 - Process-group isolation (`start_new_session`) is implemented for Unix-style
   kills; Windows uses TaskKill and remains the platform actually exercised.
-- Deep test mode, Forge live-install on this machine, and organic-crash
-  repair still lack fresh live evidence from a real run (see PROJECT_STATUS).
+- At the time of that pass, deep mode, Forge live-install, and organic-crash
+  repair still lacked fresh evidence. The dated runs below subsequently closed
+  those three evidence gaps; the current constraints are stated there.
 
 Updated 2026-08-13 — the gaps above are now closed by real runs:
 

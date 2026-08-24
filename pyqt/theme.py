@@ -1,4 +1,4 @@
-"""Design tokens + QSS for the AI Minecraft Launcher (PyQt6).
+"""Design tokens + QSS for AI Modpack Builder (PyQt6).
 
 Two palettes (dark = flagship, light = soft neutrals) behind one token
 surface, so views read `theme.CARD` etc. and get the current mode's value.
@@ -26,7 +26,7 @@ DARK = {
     "HOVER2":   "#262B30",
     "BORDER":   "rgba(255,255,255,0.07)",
     "BORDER2":  "#343A40",
-    "TEXT":     "#F3F5F6",
+    "TEXT":     "#F4F0E8",
     "TEXT2":    "#A7ADB4",
     "MUTED":    "#7E868F",  # 4.6:1 on CARD — WCAG AA for small text (was 3.9:1)
     # derived surfaces that are palette-specific

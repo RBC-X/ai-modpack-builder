@@ -71,7 +71,7 @@ class BrowserLogin:
                         "display:grid;place-items:center;min-height:100vh}.card{max-width:480px;padding:36px;"
                         "background:#191d20;border:1px solid #30363b;border-radius:14px}h1{font-size:24px}"
                         "p{color:#a7adb4;line-height:1.55}</style></head><body><main class='card'>"
-                        "<h1>You're signed in</h1><p>Return to AI Minecraft Launcher. You can close this tab.</p>"
+                        "<h1>You're signed in</h1><p>Return to AI Modpack Builder. You can close this tab.</p>"
                         "</main></body></html>")
                 body = html.encode("utf-8")
                 handler.send_response(200)

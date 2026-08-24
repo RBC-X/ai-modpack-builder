@@ -1,4 +1,4 @@
-"""AI Minecraft Launcher — PyQt6 desktop client for the AI Modpack Builder engine.
+"""AI Modpack Builder — PyQt6 desktop client and launcher shell.
 
 The launcher IS the engine: the full Python engine (pyqt/engine/) runs
 in-process inside this app. No Node server, no localhost, no second process.
@@ -70,7 +70,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self._restart_attempts = 0
         self._retry_in = 0
 
-        self.setWindowTitle("AI Minecraft Launcher")
+        self.setWindowTitle("AI Modpack Builder")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / "app.ico")))
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.resize(1365, 840)
@@ -262,16 +262,16 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         theme.polish(mark)
         mark_lay = hbox(mark, 0, margins=0)
         z = QLabel(mark)
-        z.setPixmap(icon_pixmap("zap", theme.GREEN, 17))
+        z.setPixmap(icon_pixmap("package", theme.GREEN, 17))
         z.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mark_lay.addWidget(z)
         lr.addWidget(mark)
         col = QVBoxLayout()
         col.setSpacing(0)
-        t = label(logo, "AI MINECRAFT", "logo-title")
+        t = label(logo, "AI MODPACK", "logo-title")
         col.addWidget(t)
         self._sb_labels.append(t)
-        sub = label(logo, "Launcher Engine", "logo-sub")
+        sub = label(logo, "BUILDER + LAUNCHER", "logo-sub")
         col.addWidget(sub)
         self._sb_labels.append(sub)
         lr.addLayout(col)
@@ -443,7 +443,11 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         if microsoft:
             self._acc_status.setText("Microsoft / Java")
         else:
-            self._acc_status.setText("Offline profile" if name != "N/A" else "Not configured")
+            self._acc_status.setText("Offline profile" if name != "N/A" else "Setup needed")
+        self._acc_status.setToolTip(
+            "Microsoft / Java account connected" if microsoft else
+            ("Offline Minecraft profile" if name != "N/A" else "Minecraft account not configured")
+        )
         self._acc_icon.setPixmap(avatar(name, theme.GREEN, 32, 8))
         if hasattr(self, "_acc_btn"):
             self._acc_btn.setText(name)
@@ -532,6 +536,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.library.import_requested.connect(self.import_modal.show)
         self.library.new_pack_requested.connect(self.new_pack_dialog.show)
         self.library.navigate_ai.connect(lambda: self._set_nav("ai-builder"))
+        self.library.navigate_discover.connect(lambda: self._set_nav("discover"))
         self.library.select_build.connect(self._select_build)
 
         self.packdetail.back_requested.connect(lambda: self._open_detail(None))
@@ -1343,7 +1348,7 @@ def main() -> int:
         except Exception:
             pass
     app = QApplication(sys.argv)
-    app.setApplicationName("AI Minecraft Launcher")
+    app.setApplicationName("AI Modpack Builder")
     from engine.core import resource_path
     app.setWindowIcon(QIcon(str(resource_path("app.ico"))))
     theme.setup_fonts(app)
@@ -1427,20 +1432,20 @@ def main() -> int:
                         missing_mods.append(_mod)
                 res["checks"].append({"name": "shader/resource-pack engine importable",
                                       "ok": not missing_mods, "missing": missing_mods})
-                # Zero-config provider promise: a fresh install has no per-user
-                # CurseForge key, so the publisher-embedded default must resolve
-                # (Modrinth needs no key at all). Source labels are reported so
-                # a machine with a stored per-user key still passes honestly.
+                # Modrinth is the zero-configuration provider. CurseForge is an
+                # optional second provider for unsigned/dev builds, while the
+                # signed release pipeline separately requires the publisher key.
                 try:
                     from engine.providers.settings import SettingsStore
                     src = SettingsStore().curseforge_key_source()
                     res["checks"].append({
-                        "name": "curseforge key resolves",
-                        "ok": bool(src) and src != "none",
+                        "name": "provider configuration readable",
+                        "ok": True,
+                        "curseforgeAvailable": bool(src) and src != "none",
                         "source": src,
                     })
                 except Exception as _ke:  # noqa: BLE001
-                    res["checks"].append({"name": "curseforge key resolves",
+                    res["checks"].append({"name": "provider configuration readable",
                                           "ok": False, "error": str(_ke)})
             res["ok"] = all(c["ok"] for c in res["checks"])
         except Exception as e:  # noqa: BLE001

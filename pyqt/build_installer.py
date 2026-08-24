@@ -100,6 +100,16 @@ def find_iscc() -> Path | None:
 
 def main() -> int:
     global VERSION
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(
+            "Build AI Modpack Builder with PyInstaller and Inno Setup.\n\n"
+            "Usage: python pyqt/build_installer.py [--version X.Y.Z] "
+            "[--no-sign] [--verify] [--trust]\n\n"
+            "  --no-sign  Build a development installer without publisher signing.\n"
+            "  --verify   Install to a scratch directory, self-test, then uninstall.\n"
+            "  --trust    Trust the signing certificate locally after signing.\n"
+        )
+        return 0
     if "--version" in sys.argv:
         VERSION = sys.argv[sys.argv.index("--version") + 1].strip()
     sign = "--no-sign" not in sys.argv
@@ -107,6 +117,11 @@ def main() -> int:
     cf_key = embedded_cf_key()
     if cf_key:
         print(f"[info] embedding publisher CurseForge key ({len(cf_key)} chars) into the bundle", flush=True)
+    elif sign:
+        print("[error] signed publisher builds require pyqt/.secrets/curseforge-key.txt "
+              "or AMB_EMBEDDED_CURSEFORGE_KEY. Use --no-sign for a development "
+              "build that relies on Modrinth and optional manual CurseForge setup.", flush=True)
+        return 1
     else:
         print("[warn] no CurseForge key found in pyqt/.secrets/curseforge-key.txt "
               "or AMB_EMBEDDED_CURSEFORGE_KEY — this build will require a manual "

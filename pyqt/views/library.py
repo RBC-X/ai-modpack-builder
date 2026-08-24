@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
-                    label, make_clickable, pill, vbox)
+                    icon_cache, icon_pixmap, label, make_clickable, pill, vbox)
 from views.misc import _load_state, _save_state
 from views.packcard import DENSITY_PARAMS, build_pack_card
 
@@ -23,6 +23,7 @@ class LibraryView(QWidget):
     import_requested = pyqtSignal()
     new_pack_requested = pyqtSignal()
     navigate_ai = pyqtSignal()
+    navigate_discover = pyqtSignal()
     select_build = pyqtSignal(str)
     density_changed = pyqtSignal(str)     # 'cozy' | 'compact' (Home mirrors it)
 
@@ -131,8 +132,50 @@ class LibraryView(QWidget):
         self._grid = QGridLayout()
         self._grid.setSpacing(16)
         self.root.addLayout(self._grid)
-        self._empty = label(body, "No instances match your filter.", "sub")
-        self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty = QFrame(body)
+        self._empty.setProperty("cls", "empty-state")
+        self._empty.setMinimumHeight(258)
+        theme.polish(self._empty)
+        empty_lay = vbox(self._empty, 12, margins=(32, 30, 32, 30))
+        empty_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_mark = QFrame(self._empty)
+        empty_mark.setProperty("cls", "logo-badge")
+        empty_mark.setFixedSize(52, 52)
+        theme.polish(empty_mark)
+        mark_lay = vbox(empty_mark, 0, margins=0)
+        mark_icon = QLabel(empty_mark)
+        mark_icon.setPixmap(icon_pixmap("package", theme.GREEN, 26))
+        mark_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark_lay.addWidget(mark_icon)
+        empty_lay.addWidget(empty_mark, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._empty_title = label(self._empty, "Your first modpack starts here", "h2")
+        self._empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_lay.addWidget(self._empty_title)
+        self._empty_desc = label(
+            self._empty,
+            "Describe an experience for the AI builder, import an existing pack, or browse real projects.",
+            "sub",
+        )
+        self._empty_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_desc.setWordWrap(True)
+        self._empty_desc.setMaximumWidth(620)
+        empty_lay.addWidget(self._empty_desc)
+        self._empty_actions = QWidget(self._empty)
+        actions = hbox(self._empty_actions, 10, margins=0)
+        build_empty = button(self._empty_actions, "BUILD WITH AI", "btn-primary", "sparkles")
+        build_empty.clicked.connect(self.navigate_ai.emit)
+        actions.addWidget(build_empty)
+        import_empty = button(self._empty_actions, "IMPORT PACK", "btn-dark", "folder")
+        import_empty.clicked.connect(self.import_requested.emit)
+        actions.addWidget(import_empty)
+        discover_empty = button(self._empty_actions, "BROWSE PROJECTS", "btn-dark", "compass")
+        discover_empty.clicked.connect(self.navigate_discover.emit)
+        actions.addWidget(discover_empty)
+        empty_lay.addWidget(self._empty_actions, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._empty_clear = button(self._empty, "CLEAR FILTERS", "btn-dark", "refresh")
+        self._empty_clear.clicked.connect(self._clear_filters)
+        self._empty_clear.setVisible(False)
+        empty_lay.addWidget(self._empty_clear, 0, Qt.AlignmentFlag.AlignHCenter)
         self.root.addWidget(self._empty)
         self._last_cols: int | None = None
         self._last_card_w: int | None = None
@@ -269,6 +312,14 @@ class LibraryView(QWidget):
         self._render_pills()
         self._render()
 
+    def _clear_filters(self) -> None:
+        """Restore the complete Library after a zero-result search/filter."""
+        self._search.clear()
+        self._loader = "all"
+        self._loader_box.setCurrentText("all")
+        self._render_pills()
+        self._render()
+
     def _set_mode(self, mode: str) -> None:
         self._view_mode = mode
         self._render()
@@ -337,6 +388,18 @@ class LibraryView(QWidget):
         clear_layout(self._grid)
         items = self._filtered()
         self._empty.setVisible(not items)
+        if not items:
+            truly_empty = not self.builds
+            self._empty_title.setText(
+                "Your first modpack starts here" if truly_empty else "No instances match these filters"
+            )
+            self._empty_desc.setText(
+                "Describe an experience for the AI builder, import an existing pack, or browse real projects."
+                if truly_empty else
+                "Try a different search or loader. Your existing instances are still safely stored."
+            )
+            self._empty_actions.setVisible(truly_empty)
+            self._empty_clear.setVisible(not truly_empty)
         if self._view_mode == "grid":
             # Adaptive columns driven by the density preset: compact targets
             # ~205 px tiles (5-up on wide windows), cozy ~250 px (4-up). The

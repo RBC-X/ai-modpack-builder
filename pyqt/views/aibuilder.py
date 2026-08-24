@@ -54,12 +54,13 @@ class AIBuilderView(QWidget):
         body = QWidget()
         body.setProperty("page", "true")
         outer.setWidget(body)
-        self.root = vbox(body, 32, margins=(32, 32, 32, 32))
+        self.root = vbox(body, 24, margins=(32, 26, 32, 32))
+        self.root.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QWidget(body)
-        header.setFixedHeight(150)
-        head = vbox(header, 10, margins=(0, 14, 0, 0))
+        header.setFixedHeight(142)
+        head = vbox(header, 8, margins=(0, 6, 0, 0))
         head.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         mark = QFrame(header)
         mark.setProperty("cls", "logo-badge")
@@ -83,14 +84,17 @@ class AIBuilderView(QWidget):
 
         self._input_card = card(body)
         self._input_card.setMaximumWidth(960)
-        self._input_card.setFixedHeight(232)
+        self._input_card.setFixedHeight(218)
         self._input_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._input_lay = vbox(self._input_card, 12, margins=(16, 16, 16, 16))
         self._prompt = QTextEdit(self._input_card)
-        self._prompt.setPlaceholderText("Make me a Minecraft 1.20.1 medieval fantasy RPG with around 120 mods, Create, magic, bosses, "
-                                        "better villages, realistic terrain, shaders and good performance on my PC.")
-        self._prompt.setMinimumHeight(126)
-        self._prompt.setStyleSheet("QTextEdit { background: transparent; border: none; font-size: 14px; }")
+        self._prompt.setPlaceholderText("Describe the Minecraft experience you want to build…")
+        self._prompt.setMinimumHeight(112)
+        self._prompt.setStyleSheet(
+            f"QTextEdit {{ background: transparent; border: 1px solid transparent; "
+            f"border-radius: {theme.R_MD}px; padding: 8px; font-size: 14px; }}"
+            f"QTextEdit:focus {{ background: {theme.HOVER}; border: 1px solid rgba(57,184,106,0.72); }}"
+        )
         self._input_lay.addWidget(self._prompt)
 
         chip_rows = QVBoxLayout()
@@ -191,14 +195,13 @@ class AIBuilderView(QWidget):
         self._build_btn.clicked.connect(self._start)
         self._settings_lay.addWidget(self._build_btn)
         self._form = QWidget(body)
-        self._form.setFixedHeight(372)
-        form_lay = vbox(self._form, 24, margins=0)
+        self._form.setFixedHeight(354)
+        form_lay = vbox(self._form, 20, margins=0)
         form_lay.addWidget(self._input_card, 0, Qt.AlignmentFlag.AlignHCenter)
         form_lay.addWidget(self._settings_card, 0, Qt.AlignmentFlag.AlignHCenter)
-        # Vertically center the form in the leftover viewport space instead of
-        # leaving a dead band at the bottom (reference launchers center the
-        # hero). The stretches are removed while the timeline/done cards are
-        # shown so a running build stays top-aligned in the scroll view.
+        # Keep the form near its explanation and primary action. The nullable
+        # stretch handles remain for compatibility with older saved sessions;
+        # running/done states use the same top-aligned scroll flow.
         self._form_stretch_top = None
         self._form_stretch_bottom = None
         self.root.addWidget(self._form, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -265,13 +268,8 @@ class AIBuilderView(QWidget):
         run_async(fetch, ok, None)
 
     def _center_form(self, center: bool) -> None:
-        """Add/remove the vertical centering stretches around the form block."""
-        if center and self._form_stretch_top is None:
-            # insert after the header (index 1) and after the form
-            self._form_stretch_top = self.root.insertStretch(1, 1)
-            idx = self.root.indexOf(self._form)
-            self._form_stretch_bottom = self.root.insertStretch(idx + 1, 1)
-        elif not center and self._form_stretch_top is not None:
+        """Keep the builder top-aligned so its primary action stays in view."""
+        if self._form_stretch_top is not None:
             self.root.removeItem(self._form_stretch_top)
             self.root.removeItem(self._form_stretch_bottom)
             self._form_stretch_top = None
@@ -281,7 +279,7 @@ class AIBuilderView(QWidget):
         self._show_adv = not self._show_adv
         self._adv_grid_widget.setVisible(self._show_adv)
         self._settings_card.setFixedHeight(300 if self._show_adv else 116)
-        self._form.setFixedHeight(556 if self._show_adv else 372)
+        self._form.setFixedHeight(538 if self._show_adv else 354)
         btn.setText("Advanced Settings ▴" if self._show_adv else "Advanced Settings ▾")
 
     # ------------------------------------------------------------------

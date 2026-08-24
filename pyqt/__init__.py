@@ -1,1 +1,1 @@
-"""AI Minecraft Launcher — PyQt6 desktop client for the AI Modpack Builder engine."""
+"""AI Modpack Builder — PyQt6 desktop client and launcher shell."""

@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit,
-                             QPushButton, QScrollArea, QVBoxLayout, QWidget)
+                             QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 import theme
 from common import (avatar, button, card, clear_layout, fmt_ago, hbox, icon_btn,
-                    icon_pixmap, label, make_clickable, pill, vbox)
+                    icon_cache, icon_pixmap, label, make_clickable, pill, vbox)
 from views.misc import _load_state
 from views.packcard import DENSITY_PARAMS, build_pack_card
+from engine.core import resource_path
 
 # Rotating example prompts shown when the hero field is empty (§26). They
 # seed a coherent brief — never a fake mod list.
@@ -19,6 +21,33 @@ PROMPT_IDEAS = [
     "Realistic survival that runs well on an 8 GB laptop.",
     "Create-focused industrial civilization.",
 ]
+
+
+class _ConceptCover(QLabel):
+    """Aspect-fill a local concept image without stretching it."""
+
+    def __init__(self, path, parent=None):
+        super().__init__(parent)
+        self._source = QPixmap(str(path))
+        self.setFixedHeight(116)
+        # Ignore the pixmap's native width when layouts calculate their
+        # minimum: the card must be allowed to reflow from 3 to 2 to 1 columns.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(0)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._source.isNull() or self.width() <= 0:
+            return
+        scaled = self._source.scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        x = max(0, (scaled.width() - self.width()) // 2)
+        y = max(0, (scaled.height() - self.height()) // 2)
+        self.setPixmap(scaled.copy(x, y, self.width(), self.height()))
 
 
 class HomeView(QWidget):
@@ -292,23 +321,48 @@ class HomeView(QWidget):
 
     def _concept_card(self, concept: dict) -> QFrame:
         c = card(self._starter_section, hover=True)
-        c.setMinimumHeight(138)
+        c.setMinimumHeight(226)
         c.setCursor(Qt.CursorShape.PointingHandCursor)
-        row = hbox(c, 12, margins=(16, 14, 16, 14))
-        ic = QLabel(c)
-        ic.setFixedSize(40, 40)
-        ic.setPixmap(icon_pixmap(concept.get("icon") or "sparkles", theme.GREEN, 22))
+        outer = vbox(c, 0, margins=(1, 1, 1, 1))
+
+        art = QFrame(c)
+        art.setFixedHeight(116)
+        art_grid = QGridLayout(art)
+        art_grid.setContentsMargins(0, 0, 0, 0)
+        concept_id = str(concept.get("id") or "").strip()
+        cover = _ConceptCover(resource_path(f"assets/concepts/{concept_id}.jpg"), art)
+        if cover._source.isNull():
+            cover.setPixmap(icon_pixmap(concept.get("icon") or "sparkles", theme.GREEN, 34))
+        art_grid.addWidget(cover, 0, 0)
+        overlay = QWidget(art)
+        overlay_lay = vbox(overlay, 0, margins=(10, 8, 10, 8))
+        overlay_lay.addStretch(1)
+        concept_badge = label(overlay, "CONCEPT PREVIEW", "mono green")
+        concept_badge.setStyleSheet(
+            "QLabel { background: rgba(12,16,16,0.84); padding: 4px 7px; "
+            "border-radius: 5px; font-size: 9px; font-weight: 700; }"
+        )
+        overlay_lay.addWidget(concept_badge, 0, Qt.AlignmentFlag.AlignLeft)
+        art_grid.addWidget(overlay, 0, 0)
+        outer.addWidget(art)
+
+        body = QWidget(c)
+        row = hbox(body, 12, margins=(14, 12, 14, 12))
+        ic = QLabel(body)
+        ic.setFixedSize(30, 30)
+        ic.setPixmap(icon_pixmap(concept.get("icon") or "sparkles", theme.GREEN, 20))
         row.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
-        col = vbox(c, 3)
-        t = label(c, concept.get("title") or "?", "h3")
+        col = vbox(body, 3)
+        t = label(body, concept.get("title") or "?", "h3")
         col.addWidget(t)
-        tag = label(c, concept.get("tagline") or "", "muted")
+        tag = label(body, concept.get("tagline") or "", "muted")
         tag.setWordWrap(True)
         col.addWidget(tag)
-        use = label(c, "Use template →", "small green")
+        use = label(body, "Use template →", "small green")
         use.setStyleSheet(f"QLabel {{ color: {theme.GREEN}; font-weight: 600; }}")
         col.addWidget(use)
         row.addLayout(col, 1)
+        outer.addWidget(body)
         c.mousePressEvent = lambda e, cp=concept: self._open_concept_editor(cp)
         make_clickable(c, lambda: self._open_concept_editor(concept),
                        name=f"Use {concept.get('title') or 'starter'} template")
@@ -457,9 +511,11 @@ class HomeView(QWidget):
 
         hero_lay.addStretch(1)
 
-        # title and real build description. The reference hero keeps this area
-        # typographic; pack artwork remains visible in the Library cards.
+        # Product-first split hero: real pack artwork when the engine supplies
+        # it, otherwise an explicitly branded fallback — never invented pack
+        # imagery presented as real content.
         name_row = QHBoxLayout()
+        name_row.setSpacing(24)
         name_col = QVBoxLayout()
         name_col.setSpacing(8)
         t = label(self._hero_inner, b.get("name") or "Untitled pack", "banner-title")
@@ -471,7 +527,40 @@ class HomeView(QWidget):
         desc.setMaximumWidth(576)
         name_col.addWidget(desc)
         name_row.addLayout(name_col, 1)
-        name_row.addStretch(1)
+
+        artwork = QFrame(self._hero_inner)
+        artwork.setProperty("cls", "artwork")
+        artwork.setFixedSize(280, 160)
+        theme.polish(artwork)
+        cover_url = b.get("coverUrl") or b.get("iconUrl")
+        if cover_url:
+            art_grid = QGridLayout(artwork)
+            art_grid.setContentsMargins(0, 0, 0, 0)
+            art_img = QLabel(artwork)
+            art_img.setFixedSize(278, 158)
+            art_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            art_img.setPixmap(icon_pixmap("package", theme.GREEN, 56))
+            icon_cache.request(cover_url, art_img, box=(278, 158))
+            art_grid.addWidget(art_img, 0, 0)
+        else:
+            art_lay = vbox(artwork, 8, margins=(22, 20, 22, 18))
+            art_lay.addStretch(1)
+            art_icon = QLabel(artwork)
+            art_icon.setPixmap(icon_pixmap("package", theme.GREEN, 42))
+            art_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            art_lay.addWidget(art_icon)
+            fallback_title = label(artwork, "CUSTOM MODPACK", "mono green")
+            fallback_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            art_lay.addWidget(fallback_title)
+            fallback_meta = label(
+                artwork,
+                f"{b.get('modCount', 0)} compatible mods • {(b.get('loader') or 'loader').capitalize()}",
+                "muted",
+            )
+            fallback_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            art_lay.addWidget(fallback_meta)
+            art_lay.addStretch(1)
+        name_row.addWidget(artwork, 0, Qt.AlignmentFlag.AlignVCenter)
         hero_lay.addLayout(name_row)
 
         hero_lay.addStretch(1)

@@ -3,7 +3,7 @@
 Every downloaded file is treated as **untrusted input**. The safety properties
 below are implemented (with tests) rather than promised.
 
-## Downloads (`src/downloads/`, `src/core/util.ts`)
+## Downloads (`pyqt/engine/downloads.py`, `pyqt/engine/providers/`)
 
 - **Size limits**: per-file (`maxBytes`) and per-build total budget
   (`maxTotalDownloadMB`); aborts mid-stream when exceeded.
@@ -14,14 +14,14 @@ below are implemented (with tests) rather than promised.
 - **Hashing at rest**: every downloaded jar's SHA1 is recorded in the build
   record.
 
-## ZIP safety (`extractZipSafe`)
+## ZIP safety (`pyqt/engine/imports.py`, `pyqt/engine/exports.py`)
 
 - Rejects entries with absolute paths, drive letters or `..` traversal
   (verified: target must stay under the destination).
 - CRC verification per entry; size/entry-count caps against zip bombs;
   supports stored + deflate only.
 
-## Process isolation (`src/process/runner.ts`)
+## Process isolation (`pyqt/engine/process.py`, `pyqt/engine/tester.py`)
 
 - Every Minecraft/Java process runs with `cwd` = the isolated instance; the
   user's real `.minecraft` is never touched (only an explicit import would).
@@ -29,7 +29,7 @@ below are implemented (with tests) rather than promised.
   process-group kill on POSIX).
 - Logs are captured, never executed.
 
-## Instance isolation (`src/instance/instance.ts`)
+## Instance isolation (`pyqt/engine/instance.py`)
 
 - Fresh game dir per build under `workspace/builds/<id>/instance/`.
 - Worlds are never deleted; no destructive operation runs outside the workspace.
@@ -38,10 +38,10 @@ below are implemented (with tests) rather than promised.
 
 ## Credentials
 
-- CurseForge API key: env `CF_API_KEY` takes precedence; otherwise stored in
-  `workspace/config/settings.json`. It is **never logged**, never echoed by
-  the API (the UI sends a masked placeholder), and never written into build
-  records or exports.
+- CurseForge API key: env `CF_API_KEY` takes precedence; otherwise a per-user
+  key is protected with Windows DPAPI, with an optional publisher key embedded
+  only in signed release bundles. It is **never logged**, never returned to
+  the UI, and never written into build records or exports.
 - Microsoft account: the launcher uses Microsoft's system-browser authorization
   code flow with PKCE, a random CSRF state, and a temporary localhost callback,
   then exchanges the resulting token through Xbox Live and Minecraft Services.

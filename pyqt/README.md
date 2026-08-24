@@ -1,4 +1,4 @@
-# AI Minecraft Launcher (PyQt6)
+# AI Modpack Builder (PyQt6)
 
 A native desktop client for the **AI Modpack Builder** engine, ported from the
 React/Tailwind launcher design (`ai-minecraft-launcher.zip`).
