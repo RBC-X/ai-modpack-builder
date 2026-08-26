@@ -62,6 +62,8 @@ jobs:
           python pyqt/security_quality_regression_test.py
           python pyqt/update_feed_edge_test.py
           python pyqt/wcag_cards_test.py
+          python pyqt/addcontent_scoped_test.py
+          python pyqt/addcontent_overflow_test.py
           python pyqt/responsive_layout_test.py
 
       - name: Regenerate screenshots (offscreen render, real engine data)

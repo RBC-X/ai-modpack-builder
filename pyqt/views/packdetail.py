@@ -36,7 +36,7 @@ class PackDetailView(OverviewTabMixin, ContentTabMixin, LogsTabMixin,
     remove_mod = pyqtSignal(str, str, object)      # build_id, slug, type|None
     retest_requested = pyqtSignal(str)
     repair_requested = pyqtSignal(str)
-    navigate_discover = pyqtSignal()
+    add_content_requested = pyqtSignal()  # open the pack-scoped Add Content browser
     ask_ai = pyqtSignal(str, str)                  # build_id, prompt
     rename_requested = pyqtSignal(str, str)
     export_requested = pyqtSignal(str, str)        # build_id, filename

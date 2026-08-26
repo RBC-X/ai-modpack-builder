@@ -830,7 +830,7 @@ class ImportModal(QDialog):
 # ===========================================================================
 class NewPackDialog(QDialog):
     """Blank-pack creation: name + MC version + loader + RAM. The pack is
-    created empty and filled via the Mod Browser (Discover drawer)."""
+    created empty and filled from its own ADD CONTENT browser."""
 
     create_requested = pyqtSignal(str, str, str, int)  # name, mcVersion, loader, ramGB
 
@@ -898,7 +898,7 @@ class NewPackDialog(QDialog):
         nl.addWidget(label(note, "What happens next", "h3"))
         for step in [
             "The empty pack is created instantly — no downloads yet.",
-            "Open Discover and pick any mod/sharder/resource pack to add it (dependencies are resolved automatically).",
+            "Open the pack and press ADD CONTENT — it's pre-filtered to this pack's version/loader (dependencies resolve automatically).",
             "Press PLAY any time; the launcher installs Java + Mojang + loader on first launch.",
         ]:
             r = QHBoxLayout()

@@ -27,6 +27,7 @@ from common import (avatar, button, hbox, icon_cache, icon_pixmap, label, pill,
 from icons import icon
 from views.aibuilder import AIBuilderView
 from views.discover import DiscoverView
+from views.addcontent import AddContentView
 from views.home import HomeView
 from views.library import LibraryView
 from views.misc import ActivityView, DownloadsView, SettingsView
@@ -109,6 +110,9 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.home = HomeView()
         self.library = LibraryView()
         self.discover = DiscoverView(api)
+        # Pack-scoped content browser: opened from Pack Detail's ADD CONTENT
+        # (not a sidebar destination) and bound to one pack at a time.
+        self.addcontent = AddContentView(api)
         self.aibuilder = AIBuilderView(api)
         self.downloads = DownloadsView(api)
         self.activity = ActivityView(api)
@@ -117,7 +121,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.settings = SettingsView(api, self)
         self.packdetail = PackDetailView(api)
         for w in (self.home, self.library, self.discover, self.aibuilder,
-                  self.downloads, self.activity, self.packdetail):
+                  self.downloads, self.activity, self.packdetail, self.addcontent):
             self.stack.addWidget(w)
         rl.addWidget(self.stack, 1)
         root.addWidget(right, 1)
@@ -545,7 +549,12 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.packdetail.remove_mod.connect(self.remove_mod)
         self.packdetail.retest_requested.connect(self.retest)
         self.packdetail.repair_requested.connect(self.repair)
-        self.packdetail.navigate_discover.connect(lambda: self._set_nav("discover"))
+        # ADD CONTENT opens the pack-scoped browser instead of redirecting to
+        # the global Discover page (which made multi-pack installs error-prone).
+        self.packdetail.add_content_requested.connect(self._open_add_content)
+        self.addcontent.back_requested.connect(lambda: self._open_detail(self.detail_pack_id))
+        self.addcontent.add_mod.connect(self.add_mod)
+        self.addcontent.open_settings.connect(self._open_provider_settings)
         self.packdetail.ask_ai.connect(self.ask_ai)
         self.packdetail.rename_requested.connect(self.rename_pack)
         self.packdetail.backup_requested.connect(self.backup_pack)
@@ -560,6 +569,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.discover.import_pack.connect(self.import_pack)
         self.discover.open_settings.connect(self._open_provider_settings)
         self.settings.settings_changed.connect(lambda _patch: self.discover.invalidate_cache())
+        self.settings.settings_changed.connect(lambda _patch: self.addcontent.invalidate_cache())
         self.settings.settings_changed.connect(lambda _patch: self.aibuilder._load_hardware())
         self.settings.manage_account_requested.connect(self.account_modal.show)
         self.settings.theme_changed.connect(self._apply_theme)
@@ -944,6 +954,17 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         rec = self.records.get(build_id)
         self.packdetail.load(build_id, rec)
 
+    def _open_add_content(self) -> None:
+        """Show the pack-scoped Add Content browser for the pack on screen."""
+        bid = self.detail_pack_id
+        build = next((b for b in self.builds if b.get("buildId") == bid), None)
+        if not build:
+            self.toast("Open a pack first.")
+            return
+        self._title.setText(f"Add Content — {build.get('name') or 'Pack'}")
+        self.addcontent.set_pack(build)
+        self.stack.setCurrentWidget(self.addcontent)
+
     def import_pack(self, provider: str, project_id: str) -> None:
         self._run_import(f"Importing {project_id}…",
                          lambda p, c: self.api.import_pack(provider, project_id, None, p, c))
@@ -1055,7 +1076,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
 
         def ok(res):
             bid = res.get("buildId")
-            self.toast(f"Pack \"{res.get('name')}\" created ({res.get('mcVersion')} / {res.get('loader')}, {res.get('ramGB')} GB) — add mods from Discover.")
+            self.toast(f"Pack \"{res.get('name')}\" created ({res.get('mcVersion')} / {res.get('loader')}, {res.get('ramGB')} GB) — use ADD CONTENT on the pack to add mods.")
             self.refresh_builds()
             if bid:
                 self._select_build(bid)

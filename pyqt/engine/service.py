@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -146,6 +147,21 @@ def _summary_record(rec: dict) -> dict:
         "hardwareFit": f"{str(perf_load).title()} load" if perf_load else "",
         "ramTarget": f"{req.get('ramGB')} GB RAM target" if req.get("ramGB") else "",
     }
+
+
+_VIDEO_RE = re.compile(
+    r"https?://(?:www\.|m\.)?(?:youtube\.com/watch\?[^\s\"'<>)]+|youtu\.be/[A-Za-z0-9_\-]+|vimeo\.com/\d+)")
+
+
+def _extract_videos(*texts) -> list[dict]:
+    """Deduped creator-linked video URLs ({url, host}) from listing text."""
+    found: dict[str, dict] = {}
+    for text in texts:
+        for url in _VIDEO_RE.findall(str(text or "")):
+            if url not in found:
+                host = "YouTube" if ("youtube.com" in url or "youtu.be" in url) else "Vimeo"
+                found[url] = {"url": url, "host": host}
+    return list(found.values())[:6]
 
 
 class PyEngine:
@@ -2221,7 +2237,12 @@ class PyEngine:
             }) or []
         except Exception as e:
             versions = []
-        return {"project": proj, "versions": versions, "provider": provider, "loaders": ["forge", "fabric", "neoforge", "quilt"]}
+        # Creator-linked videos parsed from the project's own listing text.
+        # Neither public provider API exposes a structured video feed, so this
+        # surfaces exactly what the author embedded in their description/body.
+        videos = _extract_videos((proj or {}).get("body"), (proj or {}).get("description"))
+        return {"project": proj, "versions": versions, "provider": provider, "videos": videos,
+                "loaders": ["forge", "fabric", "neoforge", "quilt"]}
 
     def add_mod(self, build_id: str, provider: str, project_id: str,
                 version_id: str = None, type: str = None) -> dict:

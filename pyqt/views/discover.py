@@ -99,12 +99,22 @@ class DiscoverView(QWidget):
         heading = QWidget(body)
         heading_lay = hbox(heading, 12, margins=0)
         heading_col = vbox(heading, 1)
-        heading_col.addWidget(label(heading, "Discover content", "h1"))
-        heading_col.addWidget(label(
+        # Kept as attributes: scoped subclasses (Add Content) retitle the page
+        # and prepend controls (a back button) into the same heading row.
+        self.heading_row = heading
+        self._heading_col = heading_col
+        self._heading_title = label(heading, "Discover content", "h1")
+        self._heading_sub = label(
             heading,
             "Browse real projects, inspect their artwork and compatibility, then add them to a pack.",
             "small",
-        ))
+        )
+        # Single-line QLabels carry their full text as the layout minimum —
+        # without wrapping, this heading alone forced a ~1244 px page minimum
+        # and hid ~450 px of controls at the app's minimum window width.
+        self._heading_sub.setWordWrap(True)
+        heading_col.addWidget(self._heading_title)
+        heading_col.addWidget(self._heading_sub)
         heading_lay.addLayout(heading_col, 1)
         self._catalog_badge = pill(heading, "Live catalogs", True, "pill", "wifi", theme.GREEN)
         self._catalog_badge.setToolTip("Results come from the live provider APIs or their verified local cache.")
@@ -210,9 +220,11 @@ class DiscoverView(QWidget):
 
         # Pagination: next/prev across provider results. Always visible; the
         # Next button enables only when a full page came back (more may exist),
-        # and resets to page 0 on any new search/filter change.
+        # and resets to page 0 on any new search/filter change. Kept compact:
+        # this row is the widest fixed-minimum element on the page, and every
+        # pixel of slack keeps zero hidden overflow at the smallest window.
         pager = card(body)
-        pager_lay = hbox(pager, 10, margins=(14, 10, 14, 10))
+        pager_lay = hbox(pager, 8, margins=(14, 9, 14, 9))
         self._pager_status = label(pager, "Page 1", "muted")
         pager_lay.addWidget(self._pager_status)
         # Results-count + "more may exist" hint: explains exactly why the Next
@@ -224,8 +236,8 @@ class DiscoverView(QWidget):
         # Jump-to-page: a spin box that skips straight to any page of a large
         # catalog (total ÷ page size), applying immediately on arrows/Enter.
         # Disabled while the real total is unknown — we never guess.
-        self._jump_label = label(pager, "Jump to", "muted")
-        pager_lay.addWidget(self._jump_label)
+        # The jump control explains itself via its tooltip (a separate
+        # "Jump to" label cost ~94 px of always-on minimum width).
         self._jump_spin = QSpinBox(pager)
         self._jump_spin.setRange(1, 1)
         self._jump_spin.setMinimumWidth(92)
@@ -362,7 +374,11 @@ class DiscoverView(QWidget):
     def _on_filter(self, _idx: int) -> None:
         self._remember_page()
         self._loader = LOADERS[self._loader_box.currentIndex()]
-        self._version = VERSIONS[self._ver_box.currentIndex()]
+        # Version combos carry data values in scoped subclasses (a pack's MC
+        # version may sit outside the global list); plain Discover entries
+        # have no userData, so fall back to the positional mapping.
+        data = self._ver_box.currentData()
+        self._version = data if data is not None else VERSIONS[self._ver_box.currentIndex()]
         self._page = int(self._remembered.get(self._ctx_key(), 0) or 0)
         self._search_now()
 
@@ -526,15 +542,18 @@ class DiscoverView(QWidget):
         return max(320, vp - 64)
 
     def _column_count(self) -> int:
-        """Grid columns from the real viewport. One column is a supported
-        layout below ~660 px of content (previously `max(width, 760)` made
-        the floor 760 px, so a one-column layout was unreachable)."""
+        """Grid columns from the real viewport. Thresholds respect the real
+        per-card layout minimum (~380 px: image + title block + action row),
+        so N columns can never demand more width than the viewport has —
+        previously fixed breakpoints let 2–3 columns force hidden horizontal
+        overflow at the app's minimum window size. One column is a supported
+        layout below ~760 px of content."""
         width = self._usable()
         if width >= 1480:
             return 4
-        if width >= 980:
+        if width >= 1120:
             return 3
-        if width >= 660:
+        if width >= 760:
             return 2
         return 1
 
@@ -583,7 +602,6 @@ class DiscoverView(QWidget):
         self._jump_spin.setSuffix(f" / {pages}" if pages else "")
         self._jump_spin.setValue(self._page + 1)
         self._updating_jump = False
-        self._jump_label.setEnabled(pages > 1)
 
     def _on_jump_edit(self, value: int) -> None:
         """Immediate jump-to-page: any committed value (arrows or Enter)
@@ -660,7 +678,7 @@ class DiscoverView(QWidget):
         image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         image_label.setPixmap(avatar(hit.get("title") or "?", theme.GREEN, 56, 9))
         if hit.get("iconUrl"):
-            icon_cache.request(hit["iconUrl"], image_label, 56)
+            icon_cache.request(hit["iconUrl"], image_label, 56, box=(56, 56))
         image_lay.addWidget(image_label)
         top.addWidget(image_frame)
 
@@ -668,9 +686,13 @@ class DiscoverView(QWidget):
         title = label(project_card, hit.get("title") or hit.get("slug") or "Unknown project", "h3")
         title.setWordWrap(True)
         title_col.addWidget(title)
-        title_col.addWidget(label(project_card, f"by {hit.get('author') or 'Unknown creator'}", "mono muted"))
+        author = label(project_card, f"by {hit.get('author') or 'Unknown creator'}", "mono muted")
+        author.setWordWrap(True)  # long creator names must not widen the card's layout minimum
+        title_col.addWidget(author)
         modified = fmt_ago(hit.get("dateModified"))
-        title_col.addWidget(label(project_card, f"Updated {modified}", "muted"))
+        updated = label(project_card, f"Updated {modified}", "muted")
+        updated.setWordWrap(True)
+        title_col.addWidget(updated)
         top.addLayout(title_col, 1)
         top.addWidget(self._provider_badge(project_card, hit.get("provider") or "modrinth"),
                       0, Qt.AlignmentFlag.AlignTop)
@@ -761,7 +783,7 @@ class DiscoverView(QWidget):
         project_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         project_icon.setPixmap(avatar(hit.get("title") or "?", theme.GREEN, 68, 11))
         if hit.get("iconUrl"):
-            icon_cache.request(hit["iconUrl"], project_icon, 68)
+            icon_cache.request(hit["iconUrl"], project_icon, 68, box=(68, 68))
         image_lay.addWidget(project_icon)
         head.addWidget(image_frame)
         title_col = vbox(content, 3)
@@ -796,6 +818,27 @@ class DiscoverView(QWidget):
         drawer_lay.addWidget(gallery_widget)
         self._render_gallery(hit.get("gallery") or [])
 
+        # Creator-linked videos (parsed from the project's own listing text)
+        # and an honest pointer to where community discussion lives — neither
+        # public provider API serves comments or a video feed directly.
+        self._videos_title = label(content, "Videos", "h3")
+        self._videos_title.hide()
+        drawer_lay.addWidget(self._videos_title)
+        self._videos_row = QWidget(content)
+        videos_lay = QHBoxLayout(self._videos_row)
+        videos_lay.setContentsMargins(0, 0, 0, 0)
+        videos_lay.setSpacing(8)
+        self._videos_row.hide()
+        drawer_lay.addWidget(self._videos_row)
+        provider_name = "CurseForge" if (hit.get("provider") or "") == "curseforge" else "Modrinth"
+        community = label(
+            content,
+            f"Comments live on {provider_name} — “Open project page” below takes you to the discussion.",
+            "muted",
+        )
+        community.setWordWrap(True)
+        drawer_lay.addWidget(community)
+
         version_head = QHBoxLayout()
         version_head.addWidget(label(content, "Compatible version", "h3"))
         version_head.addStretch(1)
@@ -809,7 +852,9 @@ class DiscoverView(QWidget):
         project_type = hit.get("projectType") or "mod"
         if project_type not in ("modpack", "world"):
             target_row = QHBoxLayout()
-            target_row.addWidget(label(content, "Add to", "small"))
+            # Ref kept so scoped subclasses can hide the whole selector.
+            self._target_label = label(content, "Add to", "small")
+            target_row.addWidget(self._target_label)
             self._target_box = QComboBox(content)
             for build in self.builds:
                 self._target_box.addItem(
@@ -897,6 +942,7 @@ class DiscoverView(QWidget):
             project = result.get("project") or {}
             self._drawer_description.setText(project.get("description") or hit.get("description") or "No description available.")
             self._render_gallery(project.get("gallery") or hit.get("gallery") or [])
+            self._render_videos(project.get("videos") or [])
             versions = result.get("versions") or []
             self._version_box.clear()
             if not versions:
@@ -936,21 +982,46 @@ class DiscoverView(QWidget):
         self._gallery_title.setVisible(bool(images))
         if not images:
             return
+        # Tile widths come from the actual drawer width so three screenshots
+        # exactly fill the row, and each provider image is cover-cropped into
+        # its tile — no letterbox gaps, no oversized overflow.
+        inner = min(500, max(340, self._usable())) - 40  # drawer width - page margins
+        spacing = self._gallery_lay.spacing() or 8
+        tile_w = max(90, (inner - spacing * 2) // 3)
+        label_w, label_h = tile_w - 8, 78
         for index, item in enumerate(images):
             image_frame = QFrame(self)
             image_frame.setProperty("cls", "gallery-frame")
             theme.polish(image_frame)
-            image_frame.setFixedHeight(86)
+            image_frame.setFixedSize(tile_w, 86)
             frame_lay = vbox(image_frame, margins=4)
             image_label = QLabel(image_frame)
             image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            image_label.setMinimumSize(100, 76)
-            image_label.setPixmap(avatar(item.get("title") or "Image", theme.BLUE, 76, 8))
-            icon_cache.request(item.get("thumbnailUrl") or item.get("url"), image_label, 112)
+            image_label.setFixedSize(label_w, label_h)
+            image_label.setPixmap(avatar(item.get("title") or "Image", theme.BLUE, 48, 8))
+            icon_cache.request(item.get("thumbnailUrl") or item.get("url"), image_label,
+                               size=label_h, box=(label_w, label_h))
             image_label.setToolTip(item.get("title") or item.get("description") or "Project screenshot")
             frame_lay.addWidget(image_label)
             self._gallery_lay.addWidget(image_frame, 0, index)
             self._gallery_lay.setColumnStretch(index, 1)
+
+    def _render_videos(self, videos: list[dict]) -> None:
+        """Fill the Videos row with external watch buttons (host-labeled).
+        Called from the details callback; empty lists hide the whole section."""
+        lay = self._videos_row.layout()
+        while lay.count():
+            item = lay.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        videos = [v for v in (videos or []) if v.get("url")][:4]
+        self._videos_title.setVisible(bool(videos))
+        self._videos_row.setVisible(bool(videos))
+        for video in videos:
+            chip = button(self._videos_row, f"Watch on {video.get('host')}", "btn-dark", "external")
+            chip.clicked.connect(lambda _=False, url=video["url"]: QDesktopServices.openUrl(QUrl(url)))
+            lay.addWidget(chip, 0, Qt.AlignmentFlag.AlignLeft)
+        lay.addStretch(1)
 
     def _add_selected(self, hit: dict) -> None:
         version_id = self._version_box.currentData() if hasattr(self, "_version_box") else None

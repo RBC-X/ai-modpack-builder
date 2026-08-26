@@ -263,8 +263,8 @@ class ContentTabMixin:
             retest = button(toolbar, "RE-TEST", "btn-dark", "refresh")
             retest.clicked.connect(lambda: self.retest_requested.emit(self.build_id))
             tl.addWidget(retest)
-            more = button(toolbar, "INSTALL MORE CONTENT", "btn-primary", "plus", theme.BG)
-            more.clicked.connect(self.navigate_discover.emit)
+            more = button(toolbar, "ADD CONTENT", "btn-primary", "plus", theme.BG)
+            more.clicked.connect(self.add_content_requested.emit)
             tl.addWidget(more)
             self._body_lay.addWidget(toolbar)
 
@@ -361,7 +361,7 @@ class ContentTabMixin:
             ic.setPixmap(avatar((s.get("title") or "?"), theme.GREEN, 40, 8))
             image_url = self._project_icon_url(s)
             if image_url:
-                icon_cache.request(image_url, ic, 40)
+                icon_cache.request(image_url, ic, 40, box=(40, 40))
 
     def _project_icon_url(self, selection: dict) -> str | None:
             provider = selection.get("provider")
