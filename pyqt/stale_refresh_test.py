@@ -1,14 +1,4 @@
-"""Verify refresh_builds never regresses to stale async results.
-
-refresh_builds fires from 20+ sites (the 20 s timer, bootstrap, build
-completion, launch/repair mixins). Fetches can overlap. Invariant under
-test: the library's final displayed state is always the NEWEST successful
-result, and an older in-flight fetch landing after a newer result has
-applied must be dropped — while a failed newer fetch must NOT swallow an
-older successful result.
-
-Drives the real MainWindow with a captured run_async so overlapping
-fetches are resolved in each adversarial order.
+"""Verify refresh_builds ignores stale async results.
 
     pyqt/.venv/Scripts/python pyqt/stale_refresh_test.py
 """

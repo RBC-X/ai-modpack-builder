@@ -57,8 +57,8 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
         self.api = api
         self.builds: list[dict] = []
         self.records: dict[str, dict] = {}
-        self._refresh_gen = 0        # latest invocation
-        self._refresh_applied = 0    # newest result actually applied
+        self._refresh_gen = 0
+        self._refresh_applied = 0
         self.active_nav = "home"
         self.detail_pack_id: str | None = None
         self._launching: str | None = None
@@ -671,14 +671,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
 
     # ------------------------------------------------------------------
     def refresh_builds(self) -> None:
-        # Generation tokens: refresh_builds fires from 20+ sites (timer, bootstrap,
-        # build completion, launch/repair mixins), and fetches can overlap. A result
-        # may apply only if it is NEWER than what is already displayed — a slow
-        # in-flight fetch landing after a newer one must be dropped, or the library
-        # regresses to stale data until the next tick. Comparing against the
-        # last-APPLIED generation (not the latest invocation) also means a failed
-        # newer fetch never swallows an older successful one: if gen2 errors, gen1's
-        # valid result still applies.
+        # Only a result newer than the displayed result may update the library.
         gen = self._refresh_gen = self._refresh_gen + 1
 
         def fetch():
@@ -693,8 +686,7 @@ class MainWindow(HealthMixin, LaunchMixin, QMainWindow):
 
         def ok(res):
             if gen <= self._refresh_applied:
-                # A result at least as new is already displayed — never overwrite
-                # it with a stale fetch.
+                # A newer result is already displayed.
                 return
             self._refresh_applied = gen
             lst, recs = res
