@@ -72,9 +72,7 @@ class LaunchMixin:
                 return self.api.status(bid)
 
             def ok(st):
-                # The user may have launched a different pack (or stopped) while
-                # this status fetch was in flight — a poll result for a superseded
-                # launch must never drive the overlay or stop the newer poll.
+                # Only the active launch may update the overlay or poll lifecycle.
                 if bid != self._launching:
                     return
                 self.launch_overlay.apply_status(st)
@@ -102,7 +100,7 @@ class LaunchMixin:
 
             def err(e):
                 if bid != self._launching:
-                    return  # superseded — the newer launch owns the overlay/poll
+                    return
                 self._poll.stop()
                 self.launch_overlay.hide()
                 self.toast(f"[status] {e}")
