@@ -82,7 +82,10 @@ def build_pack_card(parent: QWidget, b: dict, card_w: int, *,
     else:
         av = vbox(artwork, 10, margins=(16, 14, 16, 14))
         status_row = QHBoxLayout()
-        status_row.addWidget(label(artwork, f"Updated {fmt_ago(b.get('createdAt'))}", "muted"))
+        updated = label(artwork, f"Updated {fmt_ago(b.get('createdAt'))}", "muted")
+        updated.setProperty("allowTextClip", True)
+        updated.setToolTip(updated.text())
+        status_row.addWidget(updated)
         status_row.addStretch(1)
         status_row.addWidget(pill(artwork, status_text, status_on, status_cls))
         av.addLayout(status_row)
