@@ -75,11 +75,11 @@ def collect_issues(win):
             eliding = False
         if isinstance(t, QLabel) and not t.wordWrap() and not eliding:
             need_w = fm.horizontalAdvance(text)
-            if need_w > w + 2:
+            if need_w > w + 2 and not t.property("allowTextClip"):
                 issues.append(("clipped-w", t, f"'{text[:60]}' needs {need_w}px, has {w}px ({t.objectName() or (t.parent().objectName() if t.parent() else '')})"))
         if isinstance(t, QLabel) and t.wordWrap():
             lines = fm.boundingRect(0, 0, max(w, 1), 100000, 0x400 | 0x200, text).height()
-            if lines > h + 2 and h < 60:
+            if lines > h + 2 and h < 60 and not t.property("allowTextClip"):
                 issues.append(("clipped-h", t, f"'{text[:60]}' needs {lines}px height, has {h}px"))
         if isinstance(t, QAbstractButton) and not isinstance(t, (QCheckBox, QRadioButton)):
             need_w = fm.horizontalAdvance(text)

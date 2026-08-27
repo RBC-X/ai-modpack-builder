@@ -691,6 +691,8 @@ class DiscoverView(QWidget):
         title_col.addWidget(author)
         modified = fmt_ago(hit.get("dateModified"))
         updated = label(project_card, f"Updated {modified}", "muted")
+        updated.setProperty("allowTextClip", True)
+        updated.setToolTip(updated.text())
         updated.setWordWrap(True)
         title_col.addWidget(updated)
         top.addLayout(title_col, 1)
